@@ -14,7 +14,6 @@ import open_clip
 from src.dataset.eurosat import EuroSat
 from src.dataset.cifar100 import CIFAR100
 from src.dataset.sun397 import SUN397
-from src.dataset.cars import Cars
 from src.dataset.dtd import DTD
 from src.dataset.svhn import SVHN
 from src.dataset.gtsrb import GTSRB
@@ -26,6 +25,43 @@ import torch.nn.functional as F
 import torch.nn as nn
 from src.modules import accuracy
 from tqdm import tqdm
+
+def parse_arguments():
+    """
+    Parse command-line arguments for CLIP zero-shot evaluation and permutation experiments.
+    Returns:
+        argparse.Namespace: Parsed arguments.
+    """
+    parser = argparse.ArgumentParser(description='CLIP zero-shot evaluation')
+    parser.add_argument('--seed', default=33, type=int,
+                        help='Seed for initializing training.')
+    parser.add_argument('--dataset', type=str, default='eurosat',
+                        choices=['cifar100', 'eurosat', 'dtd', 'gtsrb', 'resisc45', 'svhn', 'sun397', 'imagenetr'], help="Dataset to evaluate.")
+    parser.add_argument('--batch_size', default=32,
+                        type=int, help='Batch size.')
+    parser.add_argument('--workers', default=4, type=int,
+                        help='Number of workers for data loading.')
+    parser.add_argument('--arch', default='ViT-B-16',
+                        type=str, help='Model architecture.')
+    parser.add_argument('--pretraining_backbone_A', default='commonpool_l_s1b_b8k',
+                        type=str, help='Pretraining model A for backbone1.')
+    parser.add_argument('--pretraining_backbone_B', default='datacomp_l_s1b_b8k',
+                        type=str, help='Pretraining model B for backbone2.')
+    parser.add_argument('--finetuned_checkpoint_A', default="/leonardo_scratch/large/userexternal/frinaldi/clip-finetuned-weights/eurosat/ViT-B-16/commonpool_l_s1b_b8k/best.pt",
+                        type=str, help='Path to finetuned model A.')
+    parser.add_argument('--alpha', default=0.8, type=float,
+                        help='Scaling coefficient.')
+    parser.add_argument(
+        '--experiment_name', default='TMEAN(Datacomp_s to Datacomp_xl)', type=str, help='Experiment name.')
+    parser.add_argument('--max_alpha', default=1,
+                        type=float, help='Max alpha.')
+    parser.add_argument('--wandb_mode', default='offline', type=str,
+                        choices=['online', 'offline', 'disabled'], help='Wandb mode')
+    parser.add_argument('--wandb_project', default='TransFusion',
+                        type=str, help='Wandb project name')
+    parser.add_argument(
+        '--base_folder', default='/leonardo_scratch/large/userexternal/frinaldi/')
+    return parser.parse_args()
 
 
 def setup_environment(args):

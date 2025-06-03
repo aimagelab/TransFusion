@@ -24,7 +24,7 @@ class EuroSat(torch.utils.data.Dataset):
 
         self.root = root
         self.split = split
-        assert split in ['train', 'test','val'], 'Split must be either train, test or val'
+        assert split in ['train', 'test', 'val'], 'Split must be either train, test or val'
         self.transform = transform
         self.target_transform = target_transform
         self.totensor = transforms.ToTensor()
@@ -50,7 +50,7 @@ class EuroSat(torch.utils.data.Dataset):
             with open(self.root + '/DONE', 'w') as f:
                 f.write('')
 
-            # downlaod split file form https://drive.google.com/file/d/1Ip7yaCWFi0eaOFUGga0lUdVi_DDQth1o/
+            # download split file from https://drive.google.com/file/d/1Ip7yaCWFi0eaOFUGga0lUdVi_DDQth1o/
             gdd.download_file_from_google_drive(file_id='1Ip7yaCWFi0eaOFUGga0lUdVi_DDQth1o',
                                                 dest_path=self.root + '/split.json')
 
@@ -65,15 +65,15 @@ class EuroSat(torch.utils.data.Dataset):
         self.train_dataloader = None
         self.test_dataloader = None
 
-
-    @staticmethod
-    def get_class_names():
-        # base_path = "/leonardo_scratch/large/userexternal/frinaldi/datasets/"
-        base_path = "/work/debiasing/datasets/"
-        if not os.path.exists(base_path + f'eurosat/DONE'):
+    def get_class_names(self):
+        """Get class names from the split file using the instance's root path."""
+        # Ensure the split file exists
+        if not os.path.exists(self.root + '/split.json'):
             gdd.download_file_from_google_drive(file_id='1Ip7yaCWFi0eaOFUGga0lUdVi_DDQth1o',
-                                                dest_path=base_path + 'eurosat/split.json')
-        return pd.DataFrame(json.load(open(base_path + 'eurosat/split.json', 'r'))['train'])[2].unique()
+                                                dest_path=self.root + '/split.json')
+        
+        # Use the instance's root path instead of a hardcoded path
+        return pd.DataFrame(json.load(open(self.root + '/split.json', 'r'))['train'])[2].unique()
 
     def __len__(self):
         return len(self.targets)

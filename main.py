@@ -14,6 +14,9 @@ from permutations.utils import apply_permutation_to_statedict
 from pathlib import Path
 import pickle
 
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
+# --- Weights & Biases setup for experiment tracking ---
 try:
     import wandb
     import wandbbq
@@ -21,45 +24,8 @@ try:
 except ImportError:
     wandb = None
 
+# --- Force CUDA synchronous execution for easier debugging ---
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
-
-def parse_arguments():
-    """
-    Parse command-line arguments for CLIP zero-shot evaluation and permutation experiments.
-    Returns:
-        argparse.Namespace: Parsed arguments.
-    """
-    parser = argparse.ArgumentParser(description='CLIP zero-shot evaluation')
-    parser.add_argument('--seed', default=33, type=int,
-                        help='Seed for initializing training.')
-    parser.add_argument('--dataset', type=str, default='eurosat',
-                        choices=['cifar100', 'eurosat'], help="Dataset to evaluate.")
-    parser.add_argument('--batch_size', default=32,
-                        type=int, help='Batch size.')
-    parser.add_argument('--workers', default=4, type=int,
-                        help='Number of workers for data loading.')
-    parser.add_argument('--arch', default='ViT-B-16',
-                        type=str, help='Model architecture.')
-    parser.add_argument('--pretraining_backbone_A', default='commonpool_l_s1b_b8k',
-                        type=str, help='Pretraining model A for backbone1.')
-    parser.add_argument('--pretraining_backbone_B', default='datacomp_l_s1b_b8k',
-                        type=str, help='Pretraining model B for backbone2.')
-    parser.add_argument('--finetuned_checkpoint_A', default="/work/debiasing/models/finetuned_models/eurosat/ViT-B-16/commonpool_l_s1b_b8k/best.pt",
-                        type=str, help='Path to finetuned model A.')
-    parser.add_argument('--alpha', default=0.8, type=float,
-                        help='Scaling coefficient.')
-    parser.add_argument(
-        '--experiment_name', default='TMEAN(Datacomp_s to Datacomp_xl)', type=str, help='Experiment name.')
-    parser.add_argument('--max_alpha', default=1,
-                        type=float, help='Max alpha.')
-    parser.add_argument('--wandb_mode', default='offline', type=str,
-                        choices=['online', 'offline', 'disabled'], help='Wandb mode')
-    parser.add_argument('--wandb_project', default='TransFusion',
-                        type=str, help='Wandb project name')
-    parser.add_argument(
-        '--base_folder', default='/leonardo_scratch/large/userexternal/frinaldi/')
-    return parser.parse_args()
 
 
 def main(args):
@@ -70,21 +36,29 @@ def main(args):
         args (argparse.Namespace): Parsed command-line arguments.
     """
 
+    # --- Set up device and experiment tracking ---
     device = setup_environment(args)
-    wandbbq.init(project=args.wandb_project, entity='fillo_rinaldi-unimore',
-                 name=f'{args.arch}_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_on_{args.dataset}', mode=args.wandb_mode, dir=args.base_folder)
+    wandbbq.init(
+        project=args.wandb_project,
+        entity='fillo_rinaldi-unimore',
+        name=f'{args.arch}_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_on_{args.dataset}',
+        mode=args.wandb_mode,
+        dir=args.base_folder
+    )
 
-    args.base_folder = "/work/debiasing"  # fix server
     model_a, model_b, model_a_ft, preprocess = get_models(args, device)
 
+    # --- Wrap models for unified interface ---
     clip_a = OpenCLIPModel(model_a).clip_model
     clip_a_ft = OpenCLIPModel(model_a_ft).clip_model
     clip_b = OpenCLIPModel(model_b).clip_model
     print(f"{args.pretraining_backbone_A} to {args.pretraining_backbone_B} on {args.dataset}")
 
+    # --- Load target and support datasets (for transfer and evaluation) ---
     target_dataloader, target_dataset, support_dataloader, support_dataset = load_dataset(
         args, preprocess, support=True)
-    args.base_folder = "/work/debiasing/frinaldi"  # fix server
+
+    # --- Evaluate original model B on both target and support sets ---
     loss, acc_task_zs = evaluate_model(
         clip_b, target_dataloader, target_dataset, device, prompt_ensemble=True)
     print(f"Model B Original | TASK : {acc_task_zs}, loss {loss}")
@@ -92,9 +66,12 @@ def main(args):
     loss, acc_supp_zs = evaluate_model(
         clip_b, support_dataloader, support_dataset, device, prompt_ensemble=True)
     print(f"Model B Original | SUPP : {acc_supp_zs}, loss {loss}")
-    wandb.log({"Model B Original | TASK": acc_task_zs,
-              "Model B Original | SUPP": acc_supp_zs})
-
+    # --- Log baseline results to wandb ---
+    wandb.log({
+        "Model B Original | TASK": acc_task_zs,
+        "Model B Original | SUPP": acc_supp_zs
+    })
+    
     ta = TaskVector(clip_a.visual, clip_a_ft.visual)
     permutation_spec_visual = CLIP_Visual_PermutationSpecBuilder(
         depth=clip_a.visual.transformer.layers).create_permutation_spec()

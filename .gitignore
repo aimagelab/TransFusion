@@ -1,0 +1,7 @@
+*.sh
+venv/
+*.err
+*.out
+requirements_copy.txt
+scripts/
+__pycache__/
