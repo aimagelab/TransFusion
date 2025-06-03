@@ -1,3 +1,10 @@
+"""
+Model wrappers for image encoding and checkpoint management.
+Provides an ImageEncoder class for feature extraction and checkpointing.
+"""
+######################################################################
+# Image Encoder Wrapper
+######################################################################
 import torch
 
 import open_clip
@@ -17,7 +24,7 @@ class ImageEncoder(torch.nn.Module):
             pretrained = 'openai'
         self.model, self.train_preprocess, self.val_preprocess = open_clip.create_model_and_transforms(
             name, pretrained=pretrained, cache_dir=args.openclip_cachedir)
-        
+
         self.cache_dir = args.cache_dir
 
         if not keep_lang and hasattr(self.model, 'transformer'):
@@ -26,7 +33,7 @@ class ImageEncoder(torch.nn.Module):
     def forward(self, images):
         assert self.model is not None
         return self.model.encode_image(images)
-    
+
     def __call__(self, inputs):
         return self.forward(inputs)
 
@@ -45,8 +52,6 @@ class ImageEncoder(torch.nn.Module):
         self.model, self.train_preprocess, self.val_preprocess = open_clip.create_model_and_transforms(
             name, pretrained=pretrained, cache_dir=args.openclip_cachedir)
         self.model.load_from_state_dict(state_dict)
-        
-
 
 
 class ClassificationHead(torch.nn.Linear):

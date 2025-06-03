@@ -1,3 +1,16 @@
+"""
+Parameter utilities for both LoRA (Low-Rank Adaptation) and full-rank (standard) fine-tuning.
+Despite the name, this module supports both low-rank (LoRA-style) and full-rank (classic) parameter adaptation.
+
+The AB argument in the custom layers can be used to inject either a low-rank delta (LoRA) or a full-rank delta (classic fine-tuning), depending on its structure:
+- If AB is a dict with both 'A' and 'B', a low-rank (LoRA) update is applied: output += B @ (A @ x^T)
+- If AB is a tensor or a dict with only 'B', a full-rank delta is applied: output += B @ x^T
+
+This allows the same code to be used for both LoRA and full fine-tuning scenarios.
+"""
+######################################################################
+# LoRA Parameter Utilities
+######################################################################
 import collections.abc
 from itertools import repeat
 import math
@@ -37,6 +50,7 @@ def get_parameter(shape, device='cpu', type_init: str = 'kaiming', transpose: bo
         param = torch.transpose(param, 1, 2)
     return torch.nn.Parameter(param)
 
+
 def _ntuple(n):
     def parse(x):
         if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
@@ -61,6 +75,13 @@ class LoRALayer():
 
 
 class LoRALinear(nn.Linear, LoRALayer):
+    """
+    Linear layer supporting both LoRA-style (low-rank) and full-rank adaptation.
+    If AB is provided, applies an additional delta to the output:
+    - If AB contains both 'A' and 'B', applies a low-rank (LoRA) update: output += B @ (A @ x^T)
+    - If AB contains only 'B' or is a tensor, applies a full-rank delta: output += B @ x^T
+    If AB is None, behaves as a standard nn.Linear.
+    """
 
     def __init__(
             self,
@@ -105,6 +126,11 @@ class LoRALinear(nn.Linear, LoRALayer):
 
 
 class LoRAAttention(nn.Module):
+    """
+    Attention layer as used in Vision Transformer.
+    Supports both LoRA-style (low-rank) and full-rank adaptation via the AB argument.
+    See LoRALinear for details on AB usage.
+    """
     """
     Attention layer as used in Vision Transformer.
     Adapted to support LoRA-style parameters.
@@ -153,13 +179,17 @@ class LoRAAttention(nn.Module):
         q = self.q(xq, AB_q)
         k = self.k(xk, AB_k)
         v = self.v(xv, AB_v)
-        q = q.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        k = k.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        v = v.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        q = q.reshape(B, N, self.num_heads, C //
+                      self.num_heads).permute(0, 2, 1, 3)
+        k = k.reshape(B, N, self.num_heads, C //
+                      self.num_heads).permute(0, 2, 1, 3)
+        v = v.reshape(B, N, self.num_heads, C //
+                      self.num_heads).permute(0, 2, 1, 3)
 
         # NOTE: flash attention is less debuggable than the original. Use the commented code below if in trouble.
         if torch.__version__ >= '2.1.0':
-            x = F.scaled_dot_product_attention(q, k, v, scale=1 / math.sqrt(q.shape[-1]), dropout_p=self.attn_drop.p)
+            x = F.scaled_dot_product_attention(
+                q, k, v, scale=1 / math.sqrt(q.shape[-1]), dropout_p=self.attn_drop.p)
         else:
             attn = (q @ k.transpose(-2, -1)) / math.sqrt(q.shape[-1])
             attn = F.softmax(attn, dim=-1)
@@ -192,6 +222,11 @@ class LayerScale(nn.Module):
 class LoRAMlp(nn.Module):
     """
     MLP as used in Vision Transformer, MLP-Mixer and related networks.
+    Supports both LoRA-style (low-rank) and full-rank adaptation via the AB argument.
+    See LoRALinear for details on AB usage.
+    """
+    """
+    MLP as used in Vision Transformer, MLP-Mixer and related networks.
     Adapted to support LoRA-style parameters.
     """
 
@@ -214,11 +249,14 @@ class LoRAMlp(nn.Module):
 
         assert use_conv is False
 
-        self.fc1 = LoRALinear(in_features, hidden_features, bias=bias[0], lora_dropout=0.)
+        self.fc1 = LoRALinear(in_features, hidden_features,
+                              bias=bias[0], lora_dropout=0.)
         self.act = act_layer()
         self.drop1 = nn.Dropout(drop_probs[0])
-        self.norm = norm_layer(hidden_features) if norm_layer is not None else nn.Identity()
-        self.fc2 = LoRALinear(hidden_features, out_features, bias=bias[1], lora_dropout=0.)
+        self.norm = norm_layer(
+            hidden_features) if norm_layer is not None else nn.Identity()
+        self.fc2 = LoRALinear(hidden_features, out_features,
+                              bias=bias[1], lora_dropout=0.)
         self.drop2 = nn.Dropout(drop_probs[1])
 
     def forward(self, x: torch.Tensor, AB: dict = None, **kwargs):
@@ -264,9 +302,12 @@ class LoRAParamModel(torch.nn.Module):
 
         for l in range(self.n_layers):
 
-            AB_q = self.create_AB(self.embed_dim, self.embed_dim, r1=rank, r2=rank)
-            AB_k = self.create_AB(self.embed_dim, self.embed_dim, r1=rank, r2=rank)
-            AB_v = self.create_AB(self.embed_dim, self.embed_dim, r1=rank, r2=rank)
+            AB_q = self.create_AB(
+                self.embed_dim, self.embed_dim, r1=rank, r2=rank)
+            AB_k = self.create_AB(
+                self.embed_dim, self.embed_dim, r1=rank, r2=rank)
+            AB_v = self.create_AB(
+                self.embed_dim, self.embed_dim, r1=rank, r2=rank)
             setattr(self, f'A_q_{l}', AB_q[0])
             setattr(self, f'B_q_{l}', AB_q[1])
             setattr(self, f'A_k_{l}', AB_k[0])
@@ -279,12 +320,14 @@ class LoRAParamModel(torch.nn.Module):
             setattr(self, f'A_proj_{l}', AB_proj[0])
             setattr(self, f'B_proj_{l}', AB_proj[1])
 
-            AB_fc1 = self.create_AB(self.embed_dim, int(mlp_ratio * self.embed_dim))
+            AB_fc1 = self.create_AB(
+                self.embed_dim, int(mlp_ratio * self.embed_dim))
 
             setattr(self, f'A_fc1_{l}', AB_fc1[0])
             setattr(self, f'B_fc1_{l}', AB_fc1[1])
 
-            AB_fc2 = self.create_AB(int(mlp_ratio * self.embed_dim), self.embed_dim)
+            AB_fc2 = self.create_AB(
+                int(mlp_ratio * self.embed_dim), self.embed_dim)
 
             setattr(self, f'A_fc2_{l}', AB_fc2[0])
             setattr(self, f'B_fc2_{l}', AB_fc2[1])
@@ -302,7 +345,8 @@ class LoRAParamModel(torch.nn.Module):
 
     def get_lora_matrices(self, task_weights=None):
         return {
-            layer_idx: self.get_lora_matrices_by_layer(layer_idx, task_weights=task_weights[layer_idx] if task_weights is not None else None)
+            layer_idx: self.get_lora_matrices_by_layer(
+                layer_idx, task_weights=task_weights[layer_idx] if task_weights is not None else None)
             for layer_idx in range(self.n_layers)
         }
 

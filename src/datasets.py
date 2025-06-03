@@ -1,3 +1,10 @@
+"""
+Dataset classes and utilities for loading and preprocessing datasets.
+Supports various vision datasets and custom dataset logic.
+"""
+######################################################################
+# Dataset Classes and Utilities
+######################################################################
 
 import io
 import json
@@ -120,7 +127,7 @@ class EuroSat(torch.utils.data.Dataset):
             lambda c: f'A centered satellite photo of a {c}.',
             lambda c: f'A centered satellite photo of the {c}.',
         ]
-        
+
         self.single_template = lambda c: f'A centered satellite photo of a {c}'
 
         if not os.path.exists(root + '/DONE'):
@@ -149,7 +156,8 @@ class EuroSat(torch.utils.data.Dataset):
         self.data = self.data_split[0].values
         self.targets = self.data_split[1].values
 
-        self.prompts = [f"A centered satellite photo of {c}" for c in self.class_names]
+        self.prompts = [
+            f"A centered satellite photo of {c}" for c in self.class_names]
 
     @staticmethod
     def get_class_names():
@@ -213,7 +221,6 @@ class CIFAR100:
 
         self.class_names = self.test_dataset.classes
 
-         
         self.templates = self.test_dataset.templates = self.train_dataset.templates = [
             lambda c:f'a photo of a {c}.',
             lambda c:f'a blurry photo of a {c}.',
@@ -339,5 +346,3 @@ class CIFAR100:
             99: 'worm'
         }
         '''
-
-        
