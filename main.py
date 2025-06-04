@@ -110,11 +110,11 @@ def main(args):
                                                               num_heads=clip_a.visual.transformer.resblocks[0].attn.num_heads))
 
     for alpha in np.linspace(0.1, args.max_alpha, 9):
+        print(f"Alpha={alpha}")
         log_data = {}
         model_b_t = deepcopy(clip_b)
         model_b_t.visual.load_state_dict(ta.apply_to(
             clip_b.visual,
-            clip_a.visual,
             scaling_coef=alpha).state_dict()
         )
         loss, acc_task = evaluate_model(
@@ -133,7 +133,6 @@ def main(args):
         model_b_t = deepcopy(clip_b)
         model_b_t.visual.load_state_dict(t_perm.apply_to(
             clip_b.visual,
-            clip_a.visual,
             scaling_coef=alpha).state_dict()
         )
         loss, acc_task = evaluate_model(
