@@ -5,6 +5,7 @@ Includes reproducibility setup and model loading helpers.
 ######################################################################
 # Environment and Model Utilities
 ######################################################################
+from collections import defaultdict
 from copy import deepcopy
 import torch
 import numpy as np
@@ -25,6 +26,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 from src.modules import accuracy
 from tqdm import tqdm
+from torch.utils.data import DataLoader, Subset
 
 def parse_arguments():
     """
@@ -60,7 +62,7 @@ def parse_arguments():
     parser.add_argument('--wandb_project', default='TransFusion',
                         type=str, help='Wandb project name')
     parser.add_argument(
-        '--base_folder', default='/leonardo_scratch/large/userexternal/frinaldi/')
+        '--base_folder', default='/work/debiasing/')
     return parser.parse_args()
 
 
@@ -86,6 +88,8 @@ def get_models(args, device):
                                                              device=device)
 
     finetuned_checkpoint_A = args.finetuned_checkpoint_A
+    #finetuned_checkpoint_A = "/homes/gcapitani/TransFusion/model_eurosat.pt"
+    finetuned_checkpoint_A = "/work/debiasing/models/finetuned_models/eurosat/ViT-B-16/commonpool_l_s1b_b8k/best.pt"
     state_dict = torch.load(finetuned_checkpoint_A)['model_state_dict']
     model_A_ft = deepcopy(backbone_A)
     model_A_ft.load_state_dict(state_dict)
@@ -107,10 +111,6 @@ def load_dataset(args, preprocess, support=False, few_shot=False):
                                            num_workers=args.workers, pin_memory=True, drop_last=False)
         elif args.dataset == 'sun397':
             target_dataset = SUN397(
-                preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers, batch_size=args.batch_size)
-            target_dataloader = target_dataset.test_loader
-        elif args.dataset == 'cars':
-            target_dataset = Cars(
                 preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers, batch_size=args.batch_size)
             target_dataloader = target_dataset.test_loader
         elif args.dataset == 'dtd':
@@ -183,11 +183,6 @@ def load_dataset(args, preprocess, support=False, few_shot=False):
                     dataset, shuffle=True, batch_size=args.batch_size, num_workers=args.workers)
         elif args.dataset == 'sun397':
             dataset = SUN397(
-                preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers, batch_size=args.batch_size)
-            test_loader = dataset.test_loader
-            train_loader = dataset.train_loader
-        elif args.dataset == 'cars':
-            dataset = Cars(
                 preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers, batch_size=args.batch_size)
             test_loader = dataset.test_loader
             train_loader = dataset.train_loader

@@ -6,7 +6,6 @@ Includes utilities for permutation matrix/index manipulation, inverse computatio
 # Permutation Utilities
 ######################################################################
 import torch.nn.functional as F
-from geomstats.geometry.spd_matrices import SPDMatrices
 import copy
 import itertools
 import json
