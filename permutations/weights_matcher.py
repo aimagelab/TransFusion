@@ -11,6 +11,7 @@ Provides utilities for solving linear assignment problems and computing similari
 ######################################################################
 import logging
 from enum import auto
+import sys
 from typing import List, Tuple, Union, Dict, Any
 import numpy as np
 import torch
@@ -285,7 +286,8 @@ class WeightMatcher:
         """
         intra_head_phase = False
         extra_head_progress = False 
-        for iteration in tqdm(range(self.max_iter), desc="Weight matching"):
+        for iteration in tqdm(range(self.max_iter), desc="Weight matching", file=sys.stdout):
+            sys.stdout.flush()
             progress = False
             perm_order = get_layer_iteration_order(self.layer_iteration_order, self.num_layers)
             

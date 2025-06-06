@@ -49,7 +49,7 @@ def parse_arguments():
                         type=str, help='Pretraining model A for backbone1.')
     parser.add_argument('--pretraining_backbone_B', default='datacomp_l_s1b_b8k',
                         type=str, help='Pretraining model B for backbone2.')
-    parser.add_argument('--finetuned_checkpoint_A', default="/leonardo_scratch/large/userexternal/frinaldi/clip-finetuned-weights/eurosat/ViT-B-16/commonpool_l_s1b_b8k/best.pt",
+    parser.add_argument('--finetuned_checkpoint_A', default="/leonardo_scratch/large/userexternal/frinaldi/commonpool_l_s1b_b8k/best.pt",
                         type=str, help='Path to finetuned model A.')
     parser.add_argument('--alpha', default=0.8, type=float,
                         help='Scaling coefficient.')
@@ -88,8 +88,6 @@ def get_models(args, device):
                                                              device=device)
 
     finetuned_checkpoint_A = args.finetuned_checkpoint_A
-    #finetuned_checkpoint_A = "/homes/gcapitani/TransFusion/model_eurosat.pt"
-    finetuned_checkpoint_A = "/work/debiasing/models/finetuned_models/eurosat/ViT-B-16/commonpool_l_s1b_b8k/best.pt"
     state_dict = torch.load(finetuned_checkpoint_A)['model_state_dict']
     model_A_ft = deepcopy(backbone_A)
     model_A_ft.load_state_dict(state_dict)

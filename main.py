@@ -13,7 +13,7 @@ from permutations.weights_matcher import WeightMatcher, LayerIterationOrder
 from permutations.utils import apply_permutation_to_statedict
 from pathlib import Path
 import pickle
-
+import logging
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 # --- Weights & Biases setup for experiment tracking ---
@@ -27,6 +27,7 @@ except ImportError:
 # --- Force CUDA synchronous execution for easier debugging ---
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
+logger = logging.getLogger(__name__)
 
 def main(args):
     """
@@ -76,7 +77,8 @@ def main(args):
     permutation_spec_visual = CLIP_Visual_PermutationSpecBuilder(
         depth=clip_a.visual.transformer.layers).create_permutation_spec()
 
-    permutations_path = Path(args.base_folder, "permutations", args.arch)
+    # permutations_path = Path(args.base_folder, "permutations", args.arch)
+    permutations_path = Path("./permutations", args.arch)
 
     if os.path.exists(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}.pkl')):
         with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}.pkl'), 'rb') as f:
@@ -93,7 +95,7 @@ def main(args):
             permutee=clip_a.visual.state_dict(),
             num_heads=clip_a.visual.transformer.resblocks[0].attn.num_heads,
             intra_head=True,
-            layer_iteration_order=LayerIterationOrder.FORWARD)
+            layer_iteration_order=LayerIterationOrder.RANDOM)
 
         permutation_visual, heads_permutation_visual = weight_matcher.run()
 
@@ -109,7 +111,8 @@ def main(args):
                                                               heads_permutation=heads_permutation_visual,
                                                               num_heads=clip_a.visual.transformer.resblocks[0].attn.num_heads))
 
-    for alpha in np.linspace(0.1, args.max_alpha, 9):
+    for alpha in [1]:
+    # for alpha in np.linspace(, args.max_alpha, 9):
         print(f"Alpha={alpha}")
         log_data = {}
         model_b_t = deepcopy(clip_b)

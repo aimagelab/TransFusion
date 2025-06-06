@@ -16,7 +16,6 @@ from torch.utils.data import Subset
 import logging
 from tqdm import tqdm
 from src.modules import *
-from src.datasets import CIFAR100, EuroSat
 import os
 from pathlib import Path
 import numpy as np
