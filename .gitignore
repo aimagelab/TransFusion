@@ -6,3 +6,4 @@ requirements_copy.txt
 scripts/
 __pycache__/
 *.ipynb
+./vscode/*
