@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from PIL import Image
 import torchvision.transforms as transforms
 import sys
@@ -38,7 +40,7 @@ class EuroSat(torch.utils.data.Dataset):
         self.single_template = lambda c: f'A centered satellite photo of a {c}'
 
         if not os.path.exists(root + '/DONE'):
-            print('Preparing dataset...', file=sys.stderr)
+            logger.info('Preparing dataset...')
             r = requests.get(
                 'https://zenodo.org/records/7711810/files/EuroSAT_RGB.zip?download=1')
             z = zipfile.ZipFile(io.BytesIO(r.content))
@@ -54,7 +56,7 @@ class EuroSat(torch.utils.data.Dataset):
             gdd.download_file_from_google_drive(file_id='1Ip7yaCWFi0eaOFUGga0lUdVi_DDQth1o',
                                                 dest_path=self.root + '/split.json')
 
-            print('Done', file=sys.stderr)
+            logger.info('Done')
 
         self.data_split = pd.DataFrame(
             json.load(open(self.root + '/split.json', 'r'))[split])

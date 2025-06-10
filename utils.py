@@ -27,6 +27,11 @@ import torch.nn as nn
 from src.modules import accuracy
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
+from pathlib import Path
+import logging
+
+# Set up logger for this module
+logger = logging.getLogger(__name__)
 
 def parse_arguments():
     """
@@ -49,12 +54,12 @@ def parse_arguments():
                         type=str, help='Pretraining model A for backbone1.')
     parser.add_argument('--pretraining_backbone_B', default='datacomp_l_s1b_b8k',
                         type=str, help='Pretraining model B for backbone2.')
-    parser.add_argument('--finetuned_checkpoint_A', default="/leonardo_scratch/large/userexternal/frinaldi/commonpool_l_s1b_b8k/best.pt",
-                        type=str, help='Path to finetuned model A.')
+    parser.add_argument('--finetuned_checkpoint_A', default=None,
+                        type=str, help='Path to finetuned model A. If not set, defaults to checkpoints/<arch>/<dataset>/model.pt')
     parser.add_argument('--alpha', default=0.8, type=float,
                         help='Scaling coefficient.')
     parser.add_argument(
-        '--experiment_name', default='TMEAN(Datacomp_s to Datacomp_xl)', type=str, help='Experiment name.')
+        '--experiment_name', default='TransFusion', type=str, help='Experiment name.')
     parser.add_argument('--max_alpha', default=1,
                         type=float, help='Max alpha.')
     parser.add_argument('--wandb_mode', default='offline', type=str,
@@ -63,7 +68,10 @@ def parse_arguments():
                         type=str, help='Wandb project name')
     parser.add_argument(
         '--base_folder', default='/work/debiasing/')
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.finetuned_checkpoint_A is None:
+        args.finetuned_checkpoint_A = f"checkpoints/{args.arch}/{args.dataset}/model.pt"
+    return args
 
 
 def setup_environment(args):
@@ -86,9 +94,7 @@ def get_models(args, device):
                                                              pretrained=args.pretraining_backbone_B,
                                                              cache_dir=f'{args.base_folder}/open_clip',
                                                              device=device)
-
-    finetuned_checkpoint_A = args.finetuned_checkpoint_A
-    state_dict = torch.load(finetuned_checkpoint_A)['model_state_dict']
+    state_dict = torch.load(args.finetuned_checkpoint_A)['model_state_dict']
     model_A_ft = deepcopy(backbone_A)
     model_A_ft.load_state_dict(state_dict)
 
@@ -97,7 +103,7 @@ def get_models(args, device):
 
 def load_dataset(args, preprocess, support=False, few_shot=False):
     if support:
-        print("Loading target and support dataset...")
+        logger.info("Loading target and support dataset...")
         if args.dataset == 'cifar100':
             target_dataset = CIFAR100(
                 preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers, batch_size=args.batch_size)
@@ -131,9 +137,10 @@ def load_dataset(args, preprocess, support=False, few_shot=False):
             target_dataset = IMAGENETR(
                 preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers)
             target_dataloader = target_dataset.test_loader
+
         else:
             raise ValueError(f"Invalid dataset: {args.dataset}")
-        print(f'Number of target samples: {len(target_dataloader.dataset)}')
+        logger.info(f'Number of target samples: {len(target_dataloader.dataset)}')
 
         # support_dataset = ImageNet(preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers)
         # support_dataset = CIFAR100(preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers, batch_size=args.batch_size)
@@ -141,12 +148,12 @@ def load_dataset(args, preprocess, support=False, few_shot=False):
             preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers)
         support_dataloader = support_dataset.test_loader
 
-        print(f'Number of support samples: {len(support_dataloader.dataset)}')
+        logger.info(f'Number of support samples: {len(support_dataloader.dataset)}')
 
         return target_dataloader, target_dataset, support_dataloader, support_dataset
 
     else:
-        print("Loading dataset...")
+        logger.info("Loading dataset...")
         if args.dataset == 'cifar100':
             dataset = CIFAR100(
                 preprocess=preprocess, location=f'{args.base_folder}/datasets', num_workers=args.workers, batch_size=args.batch_size)

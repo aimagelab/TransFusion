@@ -1,6 +1,12 @@
 """
 Specification and construction of permutation mappings for model layers.
 Defines how permutations are mapped to model layers and axes, and provides builders for different model architectures (ResNet, ViT, CLIP).
+
+This module provides utility functions and builder classes to define how permutations (reorderings) of channels/neurons are mapped to the parameters of deep learning models. The permutation specifications are used for model merging, alignment, and research on permutation invariance.
+
+All permutation axes are specified according to the storage order of weights in PyTorch (e.g., convolution weights are not transposed: (out_channels, in_channels, ...)).
+
+All comments and docstrings are in English for clarity and research reproducibility.
 """
 ######################################################################
 # Permutation Specification Classes
@@ -56,7 +62,9 @@ class PermutationSpecBuilder:
 
         return PermutationSpec(perm_to_layers_and_axes=dict(perm_to_axes), layer_and_axes_to_perm=axes_to_perm)
 
-# Funzione di utilità per i layer convoluzionali
+######################################################################
+# Utility functions for permutation specification
+######################################################################
 
 
 def conv_axes(name, in_perm, out_perm, bias=False):
@@ -69,6 +77,10 @@ def conv_axes(name, in_perm, out_perm, bias=False):
         bias (bool): Whether to include bias permutation.
     Returns:
         dict: Mapping from parameter names to permutation tuples.
+
+    Note:
+        The permutation spec is written this way because convolution weights are stored NOT transposed in PyTorch:
+        the shape is (out_channels, in_channels, ...), so the first axis is output and the second is input.
     """
     axes = {f"{name}.weight": (out_perm, in_perm, None, None,)}
 
@@ -111,7 +123,6 @@ def batchnorm_axes(name, perm):
         f"{name}.num_batches_tracked": (None,),
     }
 
-# Easy block: blocchi che non cambiano il numero di canali
 
 
 def easyblock_axes(name, perm, norm_layer="ln"):
@@ -124,24 +135,22 @@ def easyblock_axes(name, perm, norm_layer="ln"):
     Returns:
         dict: Mapping from parameter names to permutation tuples.
     """
-    """Blocchi semplici che usano una connessione residuale, senza cambiare il numero di canali."""
-    norm_axes = batchnorm_axes  # Usare BatchNorm per la normalizzazione
+    norm_axes = batchnorm_axes  # Always uses BatchNorm for normalization
 
     return {
-        # Prima convoluzione e normalizzazione
+        # First convolution and normalization
         **conv_axes(f"{name}.conv1", in_perm=perm, out_perm=f"P_{name}_inner1"),
         **norm_axes(f"{name}.bn1", f"P_{name}_inner1"),
 
-        # Seconda convoluzione e normalizzazione
+        # Second convolution and normalization
         **conv_axes(f"{name}.conv2", in_perm=f"P_{name}_inner1", out_perm=f"P_{name}_inner2"),
         **norm_axes(f"{name}.bn2", f"P_{name}_inner2"),
 
-        # Terza convoluzione e normalizzazione
+        # Third convolution and normalization
         **conv_axes(f"{name}.conv3", in_perm=f"P_{name}_inner2", out_perm=perm),
         **norm_axes(f"{name}.bn3", perm),
     }
 
-# Shortcut block: blocchi che cambiano il numero di canali
 
 
 def shortcut_block_axes(name, in_perm, out_perm, norm_layer="ln"):
@@ -155,27 +164,24 @@ def shortcut_block_axes(name, in_perm, out_perm, norm_layer="ln"):
     Returns:
         dict: Mapping from parameter names to permutation tuples.
     """
-    """Blocchi che usano una connessione residuale, cambiando il numero di canali tramite una convoluzione."""
-    norm_axes = batchnorm_axes  # Usare BatchNorm per la normalizzazione
+    norm_axes = batchnorm_axes  # Always uses BatchNorm for normalization
 
     return {
-        # Prima convoluzione e normalizzazione (cambio permutazione: input -> P_inner1)
+        # First convolution and normalization (input -> P_inner1)
         **conv_axes(f"{name}.conv1", in_perm=in_perm, out_perm=f"P_{name}_inner1"),
         **norm_axes(f"{name}.bn1", f"P_{name}_inner1"),
 
-        # Seconda convoluzione e normalizzazione (P_inner1 -> P_inner2)
+        # Second convolution and normalization (P_inner1 -> P_inner2)
         **conv_axes(f"{name}.conv2", in_perm=f"P_{name}_inner1", out_perm=f"P_{name}_inner2"),
         **norm_axes(f"{name}.bn2", f"P_{name}_inner2"),
 
-        # Terza convoluzione e normalizzazione (P_inner2 -> output)
+        # Third convolution and normalization (P_inner2 -> output)
         **conv_axes(f"{name}.conv3", in_perm=f"P_{name}_inner2", out_perm=out_perm),
         **norm_axes(f"{name}.bn3", out_perm),
 
-        # Shortcut (connessione residua): convoluzione per cambiare i canali da input a output
-        # CHECK ################## DOWN SAMPLE
+        # Shortcut: convolution to change channels from input to output
         **conv_axes(f"{name}.downsample.0", in_perm=in_perm, out_perm=out_perm),
         **norm_axes(f"{name}.downsample.1", out_perm),
-
     }
 
 # Funzione per definire i layer densi
@@ -297,6 +303,7 @@ class CLIP_Visual_PermutationSpecBuilder(PermutationSpecBuilder):
     def create_permutation_spec(self) -> PermutationSpec:
         prefix = ''
         axes_to_perm = {
+           
             **conv_axes(f"{prefix}conv1", in_perm=None, out_perm="P_conv"),
             f"{prefix}class_embedding": ("P_conv",),  # (dim)
             # (1, 1, dim) probably P_transf_in or its own P
@@ -310,7 +317,7 @@ class CLIP_Visual_PermutationSpecBuilder(PermutationSpecBuilder):
             f"{prefix}ln_post.weight": ('P_last',),
             f"{prefix}ln_post.bias": ('P_last',),
             # (1, 1, dim) probably P_transf_in or its own P
-            f"{prefix}proj": ('P_last', None),
+            f"{prefix}proj": ('P_last', None),  # Note: this weights are not transposed
 
 
         }
@@ -344,7 +351,7 @@ class CLIP_Text_PermutationSpecBuilder(PermutationSpecBuilder):
             "ln_final.bias": ('P_T_last',),  # ()?
 
             # linear proj
-            "text_projection": ('P_T_last', None),  # ()
+            "text_projection": ('P_T_last', 'P_proj'),  # Note: this weights are not transposed
 
         }
 
@@ -369,60 +376,51 @@ def transformer_block_axes_clip(depth, p_in, p_out, prefix=''):
 
         block_out = p_out if block_ind == depth - 1 else f"P{block_ind}_out"
         block_in = p_in if block_ind == 0 else f"P{block_ind-1}_out"
-        # block_out = None
-        # block_in = None
 
         block_axes = {
-            # Attention
-            # layer norm 1
-            # (dim,)
-            f"{prefix}transformer.resblocks.{block_ind}.ln_1.weight": (f"P{block_ind}_ln1", block_in),
-            # (dim,)
-            f"{prefix}transformer.resblocks.{block_ind}.ln_1.bias": (f"P{block_ind}_ln1",),
-            # HEADS
-            # (head_dim, dim) f"P{block_ind}_attn_QK_"
-            f"{prefix}transformer.resblocks.{block_ind}.attn.q.weight": (f"P{block_ind}_attn_QK", f"P{block_ind}_ln1"),
-            # (head_dim, dim)
-            f"{prefix}transformer.resblocks.{block_ind}.attn.k.weight": (f"P{block_ind}_attn_QK", f"P{block_ind}_ln1"),
-            # (head_dim, dim)
-            f"{prefix}transformer.resblocks.{block_ind}.attn.v.weight": (f"P{block_ind}_attn_QK", f"P{block_ind}_ln1"),
-            # ( dim) ?
+            # --- Attention Block ---
+            # LayerNorm before attention (shape: [dim])
+            f"{prefix}transformer.resblocks.{block_ind}.ln_1.weight": (block_in,),
+            f"{prefix}transformer.resblocks.{block_ind}.ln_1.bias": (block_in,),
+
+            # Attention heads: Q, K, V projections (shape: [head_dim, dim])
+            # Note: weights are not transposed in PyTorch, so output comes first
+            f"{prefix}transformer.resblocks.{block_ind}.attn.q.weight": (f"P{block_ind}_attn_QK", block_in),
+            f"{prefix}transformer.resblocks.{block_ind}.attn.k.weight": (f"P{block_ind}_attn_QK", block_in),
+            f"{prefix}transformer.resblocks.{block_ind}.attn.v.weight": (f"P{block_ind}_attn_QK", block_in),
+
+            # Biases for Q, K, V projections (shape: [head_dim])
             f"{prefix}transformer.resblocks.{block_ind}.attn.q.bias": (f"P{block_ind}_attn_QK",),
-            # (dim) ?
             f"{prefix}transformer.resblocks.{block_ind}.attn.k.bias": (f"P{block_ind}_attn_QK",),
-            # (dim) ?
             f"{prefix}transformer.resblocks.{block_ind}.attn.v.bias": (f"P{block_ind}_attn_QK",),
 
-            # Attention out
-
+            # Output projection after attention (shape: [dim, head_dim])
             f"{prefix}transformer.resblocks.{block_ind}.attn.proj.weight": (f"P{block_ind}_out_proj", f"P{block_ind}_attn_QK"),
-            # (f"P_{block_ind}_out_proj",),
+            # Bias for output projection (shape: [dim])
             f"transformer.resblocks.{block_ind}.attn.proj.bias": (f"P{block_ind}_out_proj",),
-            # shortcut
-            # (dim, dim) # WORKS
+
+            # Residual shortcut for attention (shape: [dim, dim])
             f"transformer.resblocks.{block_ind}.attn.shortcut_1.identity": (f"P{block_ind}_out_proj", block_in),
-            # MLP
-            # layer norm 2
-            # (dim,)
-            f"{prefix}transformer.resblocks.{block_ind}.ln_2.weight": (f"P{block_ind}_ln2", f"P{block_ind}_out_proj",),
-            # (dim,)
-            f"{prefix}transformer.resblocks.{block_ind}.ln_2.bias": (f"P{block_ind}_ln2", ),
 
-            # linear 1
+            # --- MLP Block ---
+            # LayerNorm before MLP (shape: [dim])
+            f"{prefix}transformer.resblocks.{block_ind}.ln_2.weight": (f"P{block_ind}_out_proj",),
+            f"{prefix}transformer.resblocks.{block_ind}.ln_2.bias": (f"P{block_ind}_out_proj",),
 
+            # First linear layer in MLP (shape: [mlp_dim, dim])
             f"{prefix}transformer.resblocks.{block_ind}.mlp.fc1.weight": (
                 f"P{block_ind}_mlp_out",
-                f"P{block_ind}_ln2",
-            ),  # (mlp_dim, dim)
-            # (mlp_dim,)
+                f"P{block_ind}_out_proj",
+            ),
+            # Bias for first MLP linear (shape: [mlp_dim])
             f"{prefix}transformer.resblocks.{block_ind}.mlp.fc1.bias": (f"P{block_ind}_mlp_out",),
-            # linear 2
-            # (block_out,f"P{block_ind}_mlp_out",),  # (dim, mlp_dim) # WORKS
+
+            # Second linear layer in MLP (shape: [dim, mlp_dim])
             f"{prefix}transformer.resblocks.{block_ind}.mlp.fc2.weight": (block_out, f"P{block_ind}_mlp_out",),
-            # (block_out,),  # (dim,) # WORKS
+            # Bias for second MLP linear (shape: [dim])
             f"{prefix}transformer.resblocks.{block_ind}.mlp.fc2.bias": (block_out,),
-            # shortcut 2
-            # (dim, dim) # WORKS
+
+            # Residual shortcut for MLP (shape: [dim, dim])
             f"transformer.resblocks.{block_ind}.mlp.shortcut_2.identity": (block_out, f"P{block_ind}_out_proj"),
         }
         all_axes.update(block_axes)

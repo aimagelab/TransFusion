@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 # Resource:
 # https://github.com/openai/CLIP/issues/83
 # https://github.com/openai/CLIP
@@ -89,7 +91,7 @@ def get_stratified_labels_utk(files, dataset_label):
         label_and_attributes = file.split("_")
         label = int(label_and_attributes[label_mapping[dataset_label.lower()]])
         if label == 3:
-            print(file)
+            logger.info(file)
         labels.append(label)
     labels = np.array(labels)
     return labels
@@ -576,7 +578,7 @@ def multiclass_demographic_parity_(pred_prob, y, attrs):
             idx = attrs==j
             tmp = np.abs(tmp_preds.mean().item() - tmp_preds[idx].mean().item()) + np.abs(tmp_not_preds.mean().item() - tmp_not_preds[idx].mean().item())
             dp_by_attrs.append(tmp)
-            print(tmp)
+            logger.info(tmp)
         mc_dpd += np.mean(dp_by_attrs).item()
 
     mc_dpd = mc_dpd / pred_prob.shape[1]

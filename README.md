@@ -14,6 +14,7 @@ TransFusion provides a principled and practical framework for permutation-based 
 - 📚 **Extensive Dataset Support:** Built-in loaders and templates for datasets such as CIFAR100, EuroSAT, SUN397, DTD, SVHN, GTSRB, RESISC45, ImageNet-R, Cars, and more.
 
 
+
 ## Installation ⚙️
 
 Install the required dependencies:
@@ -22,6 +23,22 @@ Install the required dependencies:
 pip install -r requirements.txt
 # For additional modules, see also src/requirements.txt
 ```
+
+### Downloading Fine-tuned Checkpoints
+
+To download the fine-tuned ViT-B-16 checkpoints for the main datasets used in the paper, use the provided script:
+
+```bash
+bash scripts/download_vitb16_models.sh
+```
+
+By default, this will download the checkpoints into `checkpoints/ViT-B-16/<dataset>/model.pt`. You can specify a different base folder as the first argument:
+
+```bash
+bash scripts/download_vitb16_models.sh /your/target/folder
+```
+
+This is required for running the main experiments and zero-shot transfer with fine-tuned models.
 
 
 

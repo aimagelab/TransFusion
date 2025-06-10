@@ -1,6 +1,12 @@
 """
-Helper functions for permutation operations and analysis.
-Includes utilities for permutation matrix/index manipulation, inverse computation, and visualization.
+Permutation utilities for weight matching and analysis in deep learning models.
+
+Main functionalities:
+- Conversion between permutation indices and matrices
+- Application of permutations to tensors and model parameters
+- Validation and inversion of permutations
+- Similarity metrics for comparing model weights or attention heads
+- Utilities for loading, unfactoring, and applying permutations to state_dicts and task vectors
 """
 ######################################################################
 # Permutation Utilities
@@ -35,10 +41,12 @@ pylogger = logging.getLogger(__name__)
 
 def get_all_symbols_combinations(symbols: Set[str]) -> List[Tuple[str, str]]:
     """
-    Given a set of symbols, returns all possible permutations of two symbols.
-
-    :param symbols: The set of symbols, e.g. {"a", "b", "c"}.
-    :return: A list of all possible permutations of two symbols, e.g. [("a", "b"), ("a", "c"), ("b", "a"), ("b", "c"), ("c", "a"), ("c", "b")].
+    Given a set of symbols, returns all possible ordered pairs (permutations of two symbols).
+    Used for generating all possible relationships between permutation domains.
+    Args:
+        symbols: set of str, e.g. {"a", "b", "c"}
+    Returns:
+        list of tuple(str, str), e.g. [("a", "b"), ("a", "c"), ...]
     """
     combinations = list(itertools.permutations(symbols, 2))
     sorted_combinations = sorted(combinations)
@@ -48,6 +56,8 @@ def get_all_symbols_combinations(symbols: Set[str]) -> List[Tuple[str, str]]:
 def get_inverse_permutations(permutations: Dict[str, PermutationIndices]) -> Dict[str, PermutationIndices]:
     """
     Given a dictionary of permutations, returns a dictionary of the inverse permutations.
+    Each permutation can be given as indices or as a matrix.
+    Returns the inverse in the same format.
     """
 
     inv_permutations = {}
@@ -70,34 +80,52 @@ def get_inverse_permutations(permutations: Dict[str, PermutationIndices]) -> Dic
 
 
 def perm_indices_to_perm_matrix(perm_indices: PermutationIndices):
+    """
+    Convert permutation indices to a permutation matrix.
+    Args:
+        perm_indices: shape (n,), e.g. [0, 2, 1]
+    Returns:
+        perm_matrix: shape (n, n), one-hot rows
+    """
     n = len(perm_indices)
     perm_matrix = torch.eye(n, device=perm_indices.device)[perm_indices.long()]
     return perm_matrix
 
 
 def perm_matrix_to_perm_indices(perm_matrix: PermutationMatrix):
+    """
+    Convert a permutation matrix to permutation indices.
+    Args:
+        perm_matrix: shape (n, n)
+    Returns:
+        perm_indices: shape (n,)
+    """
     return perm_matrix.nonzero()[:, 1].long()
 
 
 def check_permutations_are_valid(permutation, inv_permutation):
+    """
+    Check that each permutation and its inverse are valid and mutually inverse.
+    Used for debugging and validation of permutation logic.
+    """
     for layer_perm, layer_perm_inv in zip(permutation.values(), inv_permutation.values()):
         perm_matrix = perm_indices_to_perm_matrix(layer_perm)
         inv_perm_matrix = perm_indices_to_perm_matrix(layer_perm_inv).T
-
-        assert is_valid_permutation_matrix(
-            perm_matrix) and is_valid_permutation_matrix(inv_perm_matrix)
+        assert is_valid_permutation_matrix(perm_matrix)
+        assert is_valid_permutation_matrix(inv_perm_matrix)
         assert torch.all(perm_matrix == inv_perm_matrix)
 
 
 def is_valid_permutation_matrix(matrix):
+    """
+    Check if a matrix is a valid permutation matrix (square, binary, one per row/col).
+    Returns True if valid, False otherwise.
+    """
     if matrix.shape[0] != matrix.shape[1]:
         return False
-
     row_sums = torch.sum(matrix, dim=1)
     col_sums = torch.sum(matrix, dim=0)
-
     ones_tensor = torch.ones_like(row_sums)
-
     return (
         torch.all(row_sums == ones_tensor)
         and torch.all(col_sums == ones_tensor)
@@ -107,8 +135,13 @@ def is_valid_permutation_matrix(matrix):
 
 def perm_rows(x, perm):
     """
-    X ~ (n, d0) or (n, d0, d1) or (n, d0, d1, d2)
-    perm ~ (n, n)
+    Permute the first axis (rows) of tensor x by permutation matrix perm.
+    Used for applying permutations to model weights (e.g., linear/conv layers).
+    Args:
+        x: tensor, shape (n, ...)
+        perm: permutation matrix, shape (n, n)
+    Returns:
+        permuted x
     """
     assert x.shape[0] == perm.shape[0]
     assert perm.dim() == 2 and perm.shape[0] == perm.shape[1]
@@ -123,8 +156,13 @@ def perm_rows(x, perm):
 
 def perm_cols(x, perm):
     """
-    X ~ (d0, n) or (d0, d1, n) or (d0, d1, d2, n)
-    perm ~ (n, n)
+    Permute the second axis (columns) of tensor x by permutation matrix perm.
+    Used for applying permutations to model weights (e.g., linear/conv layers).
+    Args:
+        x: tensor, shape (..., n)
+        perm: permutation matrix, shape (n, n)
+    Returns:
+        permuted x
     """
     assert x.shape[1] == perm.shape[0]
     assert perm.shape[0] == perm.shape[1]
@@ -139,12 +177,17 @@ def perm_cols(x, perm):
 
 def get_permuted_param(param, perms_to_apply, perm_matrices, except_axis=None, num_heads=12, all_heads_indices=None):
     """
-    Apply to the parameter `param` all the permutations computed until the current step.
-
-    :param param: the parameter to permute
-    :param perms_to_apply: the list of permutations to apply to the parameter
-    :param perm_matrices: the list of permutation matrices
-    :param except_axis: axis to skip
+    Apply all relevant permutations to a parameter tensor, as specified by perms_to_apply.
+    Handles both standard and multi-head (attention) permutations.
+    Args:
+        param: tensor to permute
+        perms_to_apply: list of permutation names (or None)
+        perm_matrices: dict of permutation matrices/indices
+        except_axis: axis to skip (optional)
+        num_heads: number of attention heads (if relevant)
+        all_heads_indices: dict of per-head permutations (if relevant)
+    Returns:
+        permuted param
     """
 
     for axis, perm_id in enumerate(perms_to_apply):
@@ -231,17 +274,15 @@ def get_permuted_param(param, perms_to_apply, perm_matrices, except_axis=None, n
             # permute by matrix
             param = perm_tensor_by_perm_matrix(param, perm, axis)
 
-        # if param.dim() == 2 and perm.dim() == 1:
-        #     assert torch.allclose(
-        #         torch.index_select(param, axis, perm.int()),
-        #         perm_tensor_by_perm_matrix(param, perm_indices_to_perm_matrix(perm), axis),
-        #         atol=1e-3,
-        #     )
 
     return param
 
 
 def cosine_similarity_models(model1_dict, model2_dict):
+    """
+    Compute the mean cosine similarity between all matching parameters in two model state_dicts.
+    Skips batch norm tracking and identity layers.
+    """
     similarities = []
     for key in model1_dict:
         if 'num_batches_tracked' in key or 'identity' in key:
@@ -255,6 +296,10 @@ def cosine_similarity_models(model1_dict, model2_dict):
 
 
 def svd_similarity(model1_dict, model2_dict):
+    """
+    Compute the mean difference of singular values between all matching parameters in two model state_dicts.
+    Only compares parameters with at least 2 dimensions.
+    """
     svd_diffs = []
 
     for key in model1_dict:
@@ -284,6 +329,10 @@ def svd_similarity(model1_dict, model2_dict):
 
 
 def l2_norm_models(model1, model2):
+    """
+    Calculate the L2 norm of the difference between two state dictionaries.
+    Skips batch norm tracking and identity layers.
+    """
     """Calculate the L2 norm of the difference between two state dictionaries."""
     sum_diff_squared = 0
     for key in model2.keys():
@@ -295,6 +344,16 @@ def l2_norm_models(model1, model2):
 
 
 def perm_tensor_by_perm_matrix(tens, perm, axis):
+    """
+    Permute a tensor along the specified axis using a permutation matrix.
+    Used for applying permutations to model weights.
+    Args:
+        tens: tensor to permute
+        perm: permutation matrix
+        axis: 0 (rows) or 1 (columns)
+    Returns:
+        permuted tensor
+    """
     assert axis == 0 or axis == 1
     if axis == 0:
         tens = perm_rows(tens, perm)
@@ -305,6 +364,11 @@ def perm_tensor_by_perm_matrix(tens, perm, axis):
 
 
 def apply_permutation_to_statedict(ps: PermutationSpec, perm_matrices, model_a_dict, model_b_dict=None, heads_permutation=None, skip_params=False, num_heads=12):
+    """
+    Apply a set of permutations to a model's state_dict, according to a PermutationSpec.
+    Optionally supports skipping parameters not in the spec, and per-head permutations for attention.
+    Returns a new permuted state_dict.
+    """
     """Apply a `perm` to `params`."""
 
     permuted_params = {}
@@ -352,6 +416,11 @@ def apply_permutation_to_statedict(ps: PermutationSpec, perm_matrices, model_a_d
 
 
 def apply_permutation_to_task_vector(ps: PermutationSpec, perm_matrices, model_a_dict, model_b_dict, task_vector_dict, heads_permutation=None, skip_params=False, num_heads=12):
+    """
+    Apply a set of permutations to a task vector (difference of state_dicts), according to a PermutationSpec.
+    Optionally supports skipping parameters not in the spec, and per-head permutations for attention.
+    Returns a new permuted task vector.
+    """
     """Apply a `perm` to `params`."""
 
     permuted_params = {}
@@ -415,6 +484,10 @@ def apply_permutation_to_task_vector(ps: PermutationSpec, perm_matrices, model_a
 
 
 def unfactor_permutations(permutations, matrix_format=False):
+    """
+    Given a factored dictionary of permutations, compute all pairwise composed permutations.
+    Used for reconstructing full permutation relationships from factored representations.
+    """
     if matrix_format:
         raise NotImplementedError
 
@@ -445,9 +518,11 @@ def unfactor_permutations(permutations, matrix_format=False):
     return unfactored_permutations
 
 
-def load_permutations(
-    path, factored=False, matrix_format=False
-) -> Dict[str, Union[PermutationIndices, PermutationMatrix]]:
+def load_permutations(path, factored=False, matrix_format=False) -> Dict[str, Union[PermutationIndices, PermutationMatrix]]:
+    """
+    Load permutations from a JSON file, optionally unfactoring or converting to matrix format.
+    Returns a nested dictionary of permutations.
+    """
     with open(path, "r") as f:
         permutations = json.load(f)
 
@@ -473,56 +548,11 @@ def load_permutations(
 
         return permutations
 
-    # def frank_wolfe_with_sdp_penalty(W, X0, get_gradient_fn, get_objective_fn):
-    #     """
-    #     Maximise an objective f over block permutation matrices.
-
-    #     Args:
-    #         W: Data involved in the objective function.
-    #         X0: Initialisation matrix.
-
-    #     Returns:
-    #         X: Optimised matrix.
-    #         obj_vals: Objective values at each iteration.
-    #     """
-    #     n_max_fw_iters = 1000
-    #     convergence_threshold = 1e-6
-    #     X_old = X0
-
-    #     obj_vals = [get_objective_fn(X_old, W)]
-
-    #     for jj in range(n_max_fw_iters):
-
-    #         grad_f = get_gradient_fn(X_old)  # Function that computes gradient of f w.r.t. X_old.
-
-    #         grad_f_scaled = -grad_f  # Flip sign since we want to maximise.
-
-    #         # Project gradient onto set of permutation matrices
-    #         D = grad_f_scaled  # project_onto_partial_perm_blockwise(grad_f_scaled)
-
-    #         # Line search to find step size (convex combination of X_old and D)
-    #         D_minus_X_old = D - X_old
-
-    #         def fun(t):
-    #             return get_objective_fn(X_old + t * D_minus_X_old)
-
-    #         eta = fminbound(fun, 0, 1)
-
-    #         X = X_old + eta * D_minus_X_old
-
-    #         # Check convergence
-    #         obj_val = get_objective_fn(X, W)
-    #         obj_vals.append(obj_val)
-
-    #         if abs(obj_val / obj_vals[-2] - 1) < convergence_threshold:
-    #             break
-
-    #         X_old = X
-
-    #     return X, obj_vals
-
-
 def permute_batchnorm(model, perm, perm_dict, map_param_index):
+    """
+    Apply a permutation to the running_mean and running_var of BatchNorm layers in a model.
+    Used to keep batch norm statistics consistent after permuting weights.
+    """
 
     for name, module in model.named_modules():
 
@@ -542,9 +572,11 @@ def permute_batchnorm(model, perm, perm_dict, map_param_index):
                 module.running_var.copy_(module.running_var[index, ...])
 
 
-def lerp(
-    t: float, v0: Union[np.ndarray, torch.Tensor], v1: Union[np.ndarray, torch.Tensor]
-) -> Union[np.ndarray, torch.Tensor]:
+def lerp(t: float, v0: Union[np.ndarray, torch.Tensor], v1: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Linear interpolation between two vectors or arrays.
+    Used for vector arithmetic, not specific to permutations.
+    """
     return (1 - t) * v0 + t * v1
 
 
@@ -607,6 +639,10 @@ def slerp(
 
 def generalized_inner_product(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """
+    Compute the generalized inner product between two tensors A and B using einsum.
+    Used for advanced similarity or alignment metrics.
+    """
+    """
     Compute the generalized inner product between two tensors A and B.
 
     Args:
@@ -627,6 +663,10 @@ def generalized_inner_product(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
 
 
 def singular_values_norm_multihead(a: torch.Tensor, b: torch.Tensor, k=10) -> torch.Tensor:
+    """
+    Compute the norm of the difference between the top-k singular values of each head in a and b.
+    Used for comparing multi-head attention weights.
+    """
     svd_vals_a = torch.linalg.svdvals(a)[:, :k]
     svd_vals_b = torch.linalg.svdvals(b)[:, :k]
     # differenze tra vettori di valori singolari all head_a vs all_head_b
@@ -638,6 +678,10 @@ def singular_values_norm_multihead(a: torch.Tensor, b: torch.Tensor, k=10) -> to
 
 
 def singular_values_norm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the norm of the difference between the singular values of a and b.
+    Used for comparing matrices (e.g., weights).
+    """
     svd_vals_a = torch.linalg.svdvals(a)
     svd_vals_b = torch.linalg.svdvals(b)
     # differenze tra vettori di valori singolari all head_a vs all_head_b
@@ -649,16 +693,28 @@ def singular_values_norm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
 
 def gram_matrix(a, b):
+    """
+    Compute the Gram matrix (dot products) between all pairs of heads in a and b.
+    Used for attention head similarity.
+    """
     return torch.einsum('ihd,jhd->ij', a, b)
 
 
 def measure(a, b, k=10):
+    """
+    Compute a norm-based similarity between all pairs of heads in a and b.
+    Used for attention head similarity.
+    """
     res = (a.unsqueeze(1)@b.unsqueeze(0).transpose(-2, -1))
     res = torch.norm(res, dim=(-1, -2))
     return res
 
 
 def singular_value_similarity_matrix(a, b, k=10):
+    """
+    Compute a similarity matrix between heads in a and b using Wasserstein distance on top-k singular values.
+    Used for matching attention heads.
+    """
     num_heads_a = a.shape[0]
     num_heads_b = b.shape[0]
 
@@ -682,6 +738,10 @@ def singular_value_similarity_matrix(a, b, k=10):
 
 
 def procrustes_similarity_matrix(a, b):
+    """
+    Compute a similarity matrix between heads in a and b using Procrustes alignment (Frobenius norm after optimal rotation).
+    Used for matching attention heads.
+    """
     num_heads_a = a.shape[0]
     num_heads_b = b.shape[0]
 
@@ -706,6 +766,10 @@ def procrustes_similarity_matrix(a, b):
 
 
 def covariance_similarity_matrix(a, b):
+    """
+    Compute a similarity matrix between heads in a and b using Frobenius norm of covariance matrices.
+    Used for matching attention heads.
+    """
     num_heads_a = a.shape[0]
     num_heads_b = b.shape[0]
 
@@ -725,6 +789,10 @@ def covariance_similarity_matrix(a, b):
 
 
 def spectral_similarity_matrix(a, b, k=10):
+    """
+    Compute a similarity matrix between heads in a and b using Wasserstein distance on top-k eigenvalues of adjacency matrices.
+    Used for matching attention heads.
+    """
     num_heads_a = a.shape[0]
     num_heads_b = b.shape[0]
 
@@ -750,6 +818,10 @@ def spectral_similarity_matrix(a, b, k=10):
 
 
 def bures_wasserstein_similarity_matrix(a, b):
+    """
+    Compute a similarity matrix between heads in a and b using the Bures-Wasserstein distance between covariance matrices.
+    Used for matching attention heads.
+    """
     num_heads_a = a.shape[0]
     num_heads_b = b.shape[0]
 
@@ -779,6 +851,10 @@ def bures_wasserstein_similarity_matrix(a, b):
 
 
 def cosine_similarity_matrix(a, b):
+    """
+    Compute a similarity matrix between heads in a and b using cosine similarity of flattened weights.
+    Used for matching attention heads.
+    """
     num_heads_a = a.shape[0]
     num_heads_b = b.shape[0]
 
@@ -797,6 +873,10 @@ def cosine_similarity_matrix(a, b):
 
 
 def cca_similarity_matrix(a, b, num_components=5):
+    """
+    Compute a similarity matrix between heads in a and b using Canonical Correlation Analysis (CCA).
+    Used for matching attention heads.
+    """
     num_heads_a = a.shape[0]
     num_heads_b = b.shape[0]
     similarity_matrix = torch.zeros((num_heads_a, num_heads_b))
@@ -827,6 +907,11 @@ def cca_similarity_matrix(a, b, num_components=5):
 
 
 def cca(activation1, activation2):
+    """
+    Compute Canonical Correlation Analysis (CCA) between two activation matrices.
+    Returns the canonical correlations for each pair.
+    Used for comparing representations.
+    """
     """
     Compute Canonical Correlation Analysis (CCA) between two activation matrices.
 
@@ -872,6 +957,10 @@ def cca(activation1, activation2):
 def earth_movers_distance(p, q):
     """
     Compute the Earth Mover's Distance (Wasserstein Distance) between two 1D distributions.
+    Used for comparing distributions of singular values or eigenvalues.
+    """
+    """
+    Compute the Earth Mover's Distance (Wasserstein Distance) between two 1D distributions.
     """
     p_sorted, _ = torch.sort(p, dim=-1)
     q_sorted, _ = torch.sort(q, dim=-1)
@@ -883,6 +972,10 @@ def earth_movers_distance(p, q):
 
 
 def batched_emd_similarity_matrix(A, B, batch_size=100):
+    """
+    Compute the EMD similarity matrix in batches to save memory.
+    Used for large-scale comparison of distributions.
+    """
     """
     Compute the EMD similarity matrix in batches to save memory.
 

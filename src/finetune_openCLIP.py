@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 """
 Script for CLIP model training and fine-tuning with logging and evaluation.
 Handles argument parsing, training loop, evaluation, and logging.
@@ -152,7 +154,7 @@ class LiTCLIP(L.LightningModule):
                 'train/avg_loss': avg_train_loss,
                 'train/lr': current_lr
             }, step=self.global_step)
-            print(
+            logger.info(
                 f'Step {self.global_step}: Avg training loss: {avg_train_loss}')
             self.train_loss_sum = 0.0
             self.train_steps = 0
@@ -223,7 +225,7 @@ class LiTCLIP(L.LightningModule):
         self.logger.experiment.log({'val/acc': overall_acc,
                                    'val/loss': self.eval_avg_loss})
 
-        print(
+        logger.info(
             f'Step {self.global_step}: Eval accuracy: {overall_acc}, Avg eval loss: {self.eval_avg_loss}')
 
         # for name, param in self.clip_model.named_parameters():
@@ -243,7 +245,7 @@ class LiTCLIP(L.LightningModule):
             'best/acc': self.best_acc,
             'best/step': self.best_step
         })
-        print(f'Best Step: {self.best_step}')
+        logger.info(f'Best Step: {self.best_step}')
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(params=self.clip_model.visual.parameters(
@@ -297,7 +299,7 @@ if __name__ == '__main__':
     if not os.path.exists(args.result_dir):
         os.makedirs(args.result_dir)
 
-    print(f'===> Seed: {args.seed}')
+    logger.info(f'===> Seed: {args.seed}')
 
     # If using GPU then use mixed precision training.
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -313,7 +315,7 @@ if __name__ == '__main__':
     # args.base_folder = "/work/debiasing"
     train_dataloader, test_dataloader, dataset = load_dataset(args, preprocess)
     # args.base_folder = "/work/debiasing/frinaldi"
-    print(f"Finetuning on {args.dataset} dataset for {args.num_steps} steps")
+    logger.info(f"Finetuning on {args.dataset} dataset for {args.num_steps} steps")
 
     if args.pretrained_weights != "":
         checkpoint = torch.load(args.pretrained_weights)

@@ -1,27 +1,26 @@
 """
 Model definitions and wrappers for OpenCLIP and LoRA.
 
-This module is specifically designed to patch and extend the standard forward of the vision encoder in OpenCLIP models.
-The main modifications are:
 
-- Insertion of a custom Shortcut layer (with an identity matrix as parameter) that enables the application of permutations to the feature space. This allows for easy swapping or reordering of channels, and can be used for model merging, permutation alignment, or other advanced manipulations. The shortcut can be replaced with a permutation matrix instead of the identity for these purposes.
+This module extends the standard OpenCLIP vision encoder with custom layers and logic for advanced research purposes.
 
-- Replacement of the standard LayerNorm with a diagonal-matrix version (DiagLayerNorm), which allows the scale parameter (gamma) to be represented as a matrix. This enables permutations to be applied not only to the activations but also to the scaling parameters of the normalization, ensuring full consistency when permuting model weights or features.
+Key modifications:
+- Adds a custom Shortcut layer (parameterized identity matrix) to enable feature space permutations. This allows for channel swapping, model merging, permutation alignment, and other advanced manipulations. The shortcut can be replaced with a permutation matrix for these purposes.
+- Includes a DiagLayerNorm class, a diagonal-matrix version of LayerNorm that allows the scale parameter (gamma) to be a matrix. While not currently used in the default model, it is provided for potential research on permutation-invariant normalization and advanced model merging strategies.
 
-These changes make the model suitable for research on model merging, permutation invariance, and advanced fine-tuning strategies, as well as for both LoRA-style and full-rank adaptation (see lora_utils.py for details on AB argument usage).
+These changes make the model suitable for research on model merging, permutation invariance, and advanced fine-tuning strategies, including both LoRA-style and full-rank adaptation (see lora_utils.py for details on AB argument usage).
 
 Adapted from: https://github.com/mlfoundations/open_clip
 Requires: pip install open_clip_torch
 
 Note:
-    A list of available models and results for a variety of datasets can be found at:
+    A list of available models and results for various datasets can be found at:
     https://github.com/mlfoundations/open_clip/blob/main/docs/openclip_results.csv
 """
 ######################################################################
 # Utility Classes and Functions
 ######################################################################
 
-from copy import deepcopy
 import logging
 import math
 import types
@@ -38,83 +37,14 @@ except ImportError:
     raise ImportError(
         "Please install the OpenCLIP package by running: `pip install open_clip_torch`")
 
-from src.lora_utils import LoRAAttention, LoRAMlp, LoRAParamModel
-# from datasets.utils.continual_dataset import ContinualDataset
-# from models.utils.future_model import FutureModel
-# from utils import warn_once
-from argparse import ArgumentParser
-# from utils.conf import get_device
+from src.lora_utils import LoRAAttention, LoRAMlp
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
-
-def binary_to_boolean_type(value: str) -> bool:
-    """
-    Converts a binary string to a boolean type.
-
-    Args:
-        value: the binary string
-
-    Returns:
-        the boolean type
-    """
-    if not isinstance(value, str):
-        value = str(value)
-
-    value = value.lower()
-    true_values = ['true', '1', 't', 'y', 'yes']
-    false_values = ['false', '0', 'f', 'n', 'no']
-
-    assert value in true_values + false_values
-
-    return value in true_values
-
-
-CUSTOM_TEMPLATES = {  # from https://github.com/KaiyangZhou/CoOp
-    "OxfordPets": "a photo of a {}, a type of pet.",
-    "OxfordFlowers": "a photo of a {}, a type of flower.",
-    "FGVCAircraft": "a photo of a {}, a type of aircraft.",
-    "DescribableTextures": "{} texture.",
-    "EuroSAT": "a centered satellite photo of {}.",
-    "StanfordCars": "a photo of a {}.",
-    "Food101": "a photo of {}, a type of food.",
-    "SUN397": "a photo of a {}.",
-    "Caltech101": "a photo of a {}.",
-    "UCF101": "a photo of a person doing {}.",
-    "ImageNet": "a photo of a {}.",
-    "ImageNetSketch": "a photo of a {}.",
-    "ImageNetV2": "a photo of a {}.",
-    "ImageNetA": "a photo of a {}.",
-    "ImageNetR": "a photo of a {}.",
-}
-
-
-def get_parser(parser) -> ArgumentParser:
-    # parser.set_defaults(optimizer='adam')
-    parser.add_argument('--clip_backbone', type=str, default='RN50-quickgelu:yfcc15m',  # suggested: yfcc15m, cc12m
-                        choices=list(open_clip.list_pretrained(as_str=True)),
-                        help='Backbone architecture for CLIP')
-    parser.add_argument('--force_quick_gelu', type=binary_to_boolean_type, default=0,
-                        help='Whether to force the use of the quickgelu activation function')
-    parser.add_argument('--use_orig_transform', type=binary_to_boolean_type, default=0,
-                        help='Whether to use the original transform for the dataset')
-    parser.add_argument('--model_tuned', type=str, default='none',
-                        choices=['none', 'visual', 'text'],
-                        help='Tuning strategy for the CLIP model')
-    parser.add_argument('--tuning_mode', type=str, default='full',
-                        choices=['full', 'lora', 'ia3'],
-                        help='Tune the full model or with PEFT strategies')
-    parser.add_argument('--peft_layers', type=str, nargs='+', default=['qkv', 'mlp'],
-                        choices=['qkv', 'mlp'], help='Layers to tune with PEFT')
-    parser.add_argument('--use_templates', type=binary_to_boolean_type, default=0,
-                        help='Whether to use prompt templates for CLIP. NOTE: Datasets NEED to have a `get_prompt_templates` method implemented.')
-    parser.add_argument('--lora_rank', type=int, default=16,
-                        help='Rank for LoRA')
-    return parser
 
 
 class Shortcut(nn.Module):
     """
     Identity shortcut layer for residual connections.
+    This layer can be replaced with a permutation matrix for feature space manipulation.
     """
 
     def __init__(self, dim):
@@ -123,12 +53,37 @@ class Shortcut(nn.Module):
         self.identity = nn.Parameter(torch.eye(dim), requires_grad=False)
 
     def forward(self, x):
+        """
+        Applies the (optionally permuted) identity matrix to the input.
+        Args:
+            x (Tensor): Input tensor of shape [..., dim].
+        Returns:
+            Tensor: Output tensor after applying the shortcut.
+        """
         return x @ self.identity.T
+
 
 
 class DiagLayerNorm(nn.LayerNorm):
     """
     LayerNorm variant that applies a diagonal weight matrix instead of elementwise scaling.
+    This allows permutations to be applied to both activations and normalization parameters.
+
+    Example usage for a single transformer block:
+        block.ln_1 = DiagLayerNorm(
+            normalized_shape=model.visual.transformer.width,
+            eps=block.ln_1.eps,
+            elementwise_affine=True,
+            weight=block.ln_1.weight,
+            bias=block.ln_1.bias
+        )
+        block.ln_2 = DiagLayerNorm(
+            normalized_shape=model.visual.transformer.width,
+            eps=block.ln_2.eps,
+            elementwise_affine=True,
+            weight=block.ln_2.weight,
+            bias=block.ln_2.bias
+        )
     """
 
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True, weight: torch.Tensor = None, bias: torch.Tensor = None, **kwargs) -> None:
@@ -144,10 +99,17 @@ class DiagLayerNorm(nn.LayerNorm):
             self.bias = nn.Parameter(bias)
 
         if self.elementwise_affine:
-            # Convert original weight (vector) to diagonal matrix
+            # Convert the original weight (vector) to a diagonal matrix for matrix multiplication
             self.weight = nn.Parameter(torch.diag(self.weight))  # Shape [C, C]
 
     def forward(self, x: torch.Tensor):
+        """
+        Applies diagonal LayerNorm to the input.
+        Args:
+            x (Tensor): Input tensor of shape [..., C].
+        Returns:
+            Tensor: Normalized and scaled tensor.
+        """
         orig_type = x.dtype
         x = x.float()
         mean = x.mean(-1, keepdim=True)
@@ -156,14 +118,19 @@ class DiagLayerNorm(nn.LayerNorm):
 
         # Use matrix multiplication with diagonal weight instead of elementwise scaling
         if self.elementwise_affine:
-            x = x @ self.weight.T  # Shape [B, T, C]
+            x = x @ self.weight.T  # Shape [..., C]
             x = x + self.bias  # Add bias
         return x.to(orig_type)
 
 
 def _expand_token(token, batch_size: int):
     """
-    Expand a token embedding to match the batch size.
+    Expands a token embedding to match the batch size.
+    Args:
+        token (Tensor): Token embedding of shape [1, 1, dim].
+        batch_size (int): Desired batch size.
+    Returns:
+        Tensor: Expanded token embedding of shape [batch_size, 1, dim].
     """
     return token.view(1, 1, -1).expand(batch_size, -1, -1)
 
@@ -172,6 +139,12 @@ def forward_visual(ext, x: torch.Tensor, AB: dict = None):
     """
     Forward pass for the visual encoder, including patch embedding, positional encoding,
     transformer, and pooling. Handles both standard and contrastive pooling.
+    Args:
+        ext (nn.Module): Visual encoder module.
+        x (Tensor): Input image tensor.
+        AB (dict, optional): Additional bias for advanced adaptation (LoRA, etc.).
+    Returns:
+        Tensor or Tuple: Pooled features or (pooled, tokens) if output_tokens is True.
     """
     x = ext.conv1(x)  # shape = [*, width, grid, grid]
     x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
@@ -221,6 +194,13 @@ def forward_visual(ext, x: torch.Tensor, AB: dict = None):
 def transformer_forward(ext, x: torch.Tensor, attn_mask=None, AB=None):
     """
     Forward pass for the transformer encoder, iterating over residual blocks.
+    Args:
+        ext (nn.Module): Transformer module.
+        x (Tensor): Input tensor.
+        attn_mask (Tensor, optional): Attention mask.
+        AB (dict, optional): Additional bias for advanced adaptation.
+    Returns:
+        Tensor: Output of the transformer encoder.
     """
     if not ext.batch_first:
         x = x.transpose(0, 1).contiguous()    # NLD -> LND
@@ -237,6 +217,15 @@ def attention(ext, q_x: torch.Tensor, k_x=None, v_x=None, attn_mask=None, AB=Non
     Compute attention using the provided query, key, and value tensors.
     If k_x or v_x are not provided, use q_x for self-attention.
     Optionally supports additional bias (AB) for advanced attention mechanisms.
+    Args:
+        ext (nn.Module): Attention module.
+        q_x (Tensor): Query tensor.
+        k_x (Tensor, optional): Key tensor.
+        v_x (Tensor, optional): Value tensor.
+        attn_mask (Tensor, optional): Attention mask.
+        AB (Tensor, optional): Additional bias.
+    Returns:
+        Tensor: Output of the attention mechanism.
     """
     k_x = k_x if k_x is not None else q_x
     v_x = v_x if v_x is not None else q_x
@@ -255,6 +244,15 @@ def attention(ext, q_x: torch.Tensor, k_x=None, v_x=None, attn_mask=None, AB=Non
 def block_forward(ext, q_x: torch.Tensor, k_x=None, v_x=None, attn_mask=None, AB=None):
     """
     Forward pass for a transformer block, including attention and MLP with shortcuts.
+    Args:
+        ext (nn.Module): Transformer block module.
+        q_x (Tensor): Query tensor.
+        k_x (Tensor, optional): Key tensor.
+        v_x (Tensor, optional): Value tensor.
+        attn_mask (Tensor, optional): Attention mask.
+        AB (Tensor, optional): Additional bias.
+    Returns:
+        Tensor: Output of the transformer block.
     """
     k_x = ext.ln_1_kv(k_x) if hasattr(
         ext, "ln_1_kv") and k_x is not None else None
@@ -270,8 +268,10 @@ def block_forward(ext, q_x: torch.Tensor, k_x=None, v_x=None, attn_mask=None, AB
 @torch.no_grad()
 def setup_visual(model: nn.Module):
     """
-    Modify the visual transformer of the model to use custom forward methods, LoRA layers,
+    Modifies the visual transformer of the model to use custom forward methods, LoRA layers,
     and diagonal LayerNorm. This enables advanced fine-tuning and adaptation.
+    Args:
+        model (nn.Module): The model whose visual transformer will be patched.
     """
     device = next(iter(model.parameters())).device
     # for param in model.parameters():
@@ -289,20 +289,6 @@ def setup_visual(model: nn.Module):
         block.attention = types.MethodType(attention, block)
         # customize layernorm
 
-        block.ln_1 = DiagLayerNorm(
-            normalized_shape=model.visual.transformer.width,
-            eps=block.ln_1.eps,  # Preserve original epsilon
-            elementwise_affine=True,  # Ensure weight/bias are used
-            weight=block.ln_1.weight,  # Pass original ln1 weight
-            bias=block.ln_1.bias  # Pass original ln2 bias
-        )
-        block.ln_2 = DiagLayerNorm(
-            normalized_shape=model.visual.transformer.width,
-            eps=block.ln_2.eps,
-            elementwise_affine=True,
-            weight=block.ln_2.weight,  # Pass original ln2 weight
-            bias=block.ln_2.bias  # Pass original ln2 bias
-        )
 
         # replace attention
         dim = block.attn.embed_dim
@@ -353,7 +339,7 @@ def setup_visual(model: nn.Module):
 class OpenCLIPModel(nn.Module):
     """
     Wrapper for OpenCLIP models, providing unified image/text encoding and custom forward logic.
-    Automatically patches the visual transformer for advanced fine-tuning.
+    Automatically patches the visual transformer for advanced fine-tuning and adaptation.
     """
     @torch.no_grad()
     def __init__(self, clip_model: open_clip.CLIP, args=None) -> None:
@@ -363,11 +349,23 @@ class OpenCLIPModel(nn.Module):
         setup_visual(self.clip_model)
 
     def encode_image(self, image):
-        """Encode an image using the visual encoder."""
+        """
+        Encode an image using the visual encoder.
+        Args:
+            image (Tensor): Input image tensor.
+        Returns:
+            Tensor: Encoded image features.
+        """
         return self.clip_model.visual(image)
 
     def encode_text(self, text):
-        """Encode text using the transformer encoder."""
+        """
+        Encode text using the transformer encoder.
+        Args:
+            text (Tensor): Input text tensor.
+        Returns:
+            Tensor: Encoded text features.
+        """
         return self.clip_model.transformer(text)
 
     def forward(

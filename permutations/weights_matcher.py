@@ -33,9 +33,8 @@ class LayerIterationOrder(StrEnum):
     BACKWARD = auto()
     ALTERNATE = auto()
 
-
+#Epsilon for numerical threshold in convergence/improvement checks
 eps = 1e-12
-
 
 def get_layer_iteration_order(layer_iteration_order: LayerIterationOrder, num_layers: int):
     """
@@ -47,6 +46,9 @@ def get_layer_iteration_order(layer_iteration_order: LayerIterationOrder, num_la
         Sequence[int]: The order of layer indices.
     """
     if layer_iteration_order == LayerIterationOrder.RANDOM:
+        # NOTE: torch.randperm is affected by the global PyTorch random seed.
+        # The seed is set in utils.py via torch.manual_seed(args.seed), so if the seed is set before calling this function,
+        # the random order will be reproducible. Otherwise, it will be different at each run.
         return torch.randperm(num_layers)
     elif layer_iteration_order == LayerIterationOrder.FORWARD:
         return torch.arange(num_layers)
@@ -127,6 +129,8 @@ class WeightMatcher:
 
         self.perm_names = list(self.all_perm_indices.keys())
         self.num_layers = len(self.perm_names)
+
+        self.use_bias = False
 
     def _initialize_perm_indices(self) -> Dict[str, Tensor]:
         """
@@ -221,13 +225,14 @@ class WeightMatcher:
         head_dim = w_a.shape[1] // self.num_heads
         w_a = w_a.reshape(self.num_heads, head_dim, -1)
         w_b = w_b.reshape(self.num_heads, head_dim, -1)
-        try:
-            bias_params_name = params_name.replace("weight", "bias")
-            biases_a, biases_b = self.params_a[bias_params_name], self.params_b[bias_params_name]
-            w_a = torch.cat((w_a, biases_a.reshape(self.num_heads, -1).unsqueeze(2)), dim=-1)
-            w_b = torch.cat((w_b, biases_b.reshape(self.num_heads, -1).unsqueeze(2)), dim=-1)
-        except:
-            print("Bias not found for attention's linear projections")
+        if self.use_bias:
+            try:
+                bias_params_name = params_name.replace("weight", "bias")
+                biases_a, biases_b = self.params_a[bias_params_name], self.params_b[bias_params_name]
+                w_a = torch.cat((w_a, biases_a.reshape(self.num_heads, -1).unsqueeze(2)), dim=-1)
+                w_b = torch.cat((w_b, biases_b.reshape(self.num_heads, -1).unsqueeze(2)), dim=-1)
+            except:
+                print("Bias not found for attention's linear projections")
             
         if not intra_head_phase:
             self._compute_extra_head_similarity(w_a, w_b, params_name, p, sim_matrix)

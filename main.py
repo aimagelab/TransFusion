@@ -3,6 +3,16 @@ Main script for running CLIP zero-shot evaluation and permutation-based transfer
 Handles argument parsing, model loading, evaluation, and permutation matching between models.
 """
 # filepath: /homes/frinaldi/TransFusion/run_open_clip.py
+
+import logging
+import sys
+# Configura il logging su stdout PRIMA degli import locali
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s:%(name)s: %(message)s',
+    stream=sys.stdout
+)
+
 from copy import deepcopy
 from src.models import OpenCLIPModel
 from utils import *
@@ -13,7 +23,7 @@ from permutations.weights_matcher import WeightMatcher, LayerIterationOrder
 from permutations.utils import apply_permutation_to_statedict
 from pathlib import Path
 import pickle
-import logging
+
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 # --- Weights & Biases setup for experiment tracking ---
@@ -28,6 +38,7 @@ except ImportError:
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
 def main(args):
     """
@@ -53,7 +64,7 @@ def main(args):
     clip_a = OpenCLIPModel(model_a).clip_model
     clip_a_ft = OpenCLIPModel(model_a_ft).clip_model
     clip_b = OpenCLIPModel(model_b).clip_model
-    print(f"{args.pretraining_backbone_A} to {args.pretraining_backbone_B} on {args.dataset}")
+    logger.info(f"[TransFusion] Starting permutation-based transfer: {args.pretraining_backbone_A} → {args.pretraining_backbone_B} | Dataset: {args.dataset} | Architecture: {args.arch}")
 
     # --- Load target and support datasets (for transfer and evaluation) ---
     target_dataloader, target_dataset, support_dataloader, support_dataset = load_dataset(
@@ -62,16 +73,19 @@ def main(args):
     # --- Evaluate original model B on both target and support sets ---
     loss, acc_task_zs = evaluate_model(
         clip_b, target_dataloader, target_dataset, device, prompt_ensemble=True)
-    print(f"Model B Original | TASK : {acc_task_zs}, loss {loss}")
+    logger.info(f"[TransFusion] Baseline (Model B) | Target set: acc={acc_task_zs:.4f}, loss={loss:.4f}")
 
     loss, acc_supp_zs = evaluate_model(
         clip_b, support_dataloader, support_dataset, device, prompt_ensemble=True)
-    print(f"Model B Original | SUPP : {acc_supp_zs}, loss {loss}")
+    logger.info(f"[TransFusion] Baseline (Model B) | Support set: acc={acc_supp_zs:.4f}, loss={loss:.4f}")
     # --- Log baseline results to wandb ---
-    wandb.log({
-        "Model B Original | TASK": acc_task_zs,
-        "Model B Original | SUPP": acc_supp_zs
-    })
+    if wandb is not None:
+        wandb.log({
+            "Baseline/Target_Accuracy": acc_task_zs,
+            "Baseline/Support_Accuracy": acc_supp_zs,
+            "Baseline/Target_Loss": loss,
+            "Baseline/Support_Loss": loss
+        })
     
     ta = TaskVector(clip_a.visual, clip_a_ft.visual)
     permutation_spec_visual = CLIP_Visual_PermutationSpecBuilder(
@@ -80,10 +94,10 @@ def main(args):
     # permutations_path = Path(args.base_folder, "permutations", args.arch)
     permutations_path = Path("./permutations", args.arch)
 
-    if os.path.exists(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}.pkl')):
-        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}.pkl'), 'rb') as f:
+    if os.path.exists(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl')):
+        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'rb') as f:
             permutation_visual = pickle.load(f)
-        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}.pkl'), 'rb') as f:
+        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'rb') as f:
             heads_permutation_visual = pickle.load(f)
     else:
         if not os.path.exists(permutations_path):
@@ -99,9 +113,9 @@ def main(args):
 
         permutation_visual, heads_permutation_visual = weight_matcher.run()
 
-        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}.pkl'), 'wb') as f:
+        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'wb') as f:
             pickle.dump(permutation_visual, f)
-        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}.pkl'), 'wb') as f:
+        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'wb') as f:
             pickle.dump(heads_permutation_visual, f)
 
     # PERMUTED TASK VECTOR
@@ -113,7 +127,7 @@ def main(args):
 
     for alpha in [1]:
     # for alpha in np.linspace(, args.max_alpha, 9):
-        print(f"Alpha={alpha}")
+        logger.info(f"[TransFusion] Evaluating transfer with alpha={alpha}")
         log_data = {}
         model_b_t = deepcopy(clip_b)
         model_b_t.visual.load_state_dict(ta.apply_to(
@@ -122,15 +136,19 @@ def main(args):
         )
         loss, acc_task = evaluate_model(
             model_b_t, target_dataloader, target_dataset, device, prompt_ensemble=True)
-        print(f"Model B + T | TASK : {acc_task}, loss {loss}")
+        logger.info(f"[TransFusion] Model B + Task Vector | Target set: acc={acc_task:.4f}, loss={loss:.4f}")
 
         loss, acc_sup = evaluate_model(
             model_b_t, support_dataloader, support_dataset, device, prompt_ensemble=True)
-        print(f"Model B + T | SUPPORT : {acc_sup}, loss {loss}")
+        logger.info(f"[TransFusion] Model B + Task Vector | Support set: acc={acc_sup:.4f}, loss={loss:.4f}")
 
         log_data.update({
-            f"Model B + T TASK acc": 100*(acc_task - acc_task_zs),
-            f"Model B + T SUPPORT acc": 100*(acc_sup - acc_supp_zs),
+            "Delta/TaskVector/Target_Accuracy(%)": 100*(acc_task - acc_task_zs),
+            "Delta/TaskVector/Support_Accuracy(%)": 100*(acc_sup - acc_supp_zs),
+            "TaskVector/Target_Accuracy": acc_task,
+            "TaskVector/Support_Accuracy": acc_sup,
+            "TaskVector/Target_Loss": loss,
+            "TaskVector/Support_Loss": loss
         })
 
         model_b_t = deepcopy(clip_b)
@@ -140,18 +158,23 @@ def main(args):
         )
         loss, acc_task = evaluate_model(
             model_b_t, target_dataloader, target_dataset, device, prompt_ensemble=True)
-        print(f"Model B + Perm T  | TASK : {acc_task}, loss {loss}")
+        logger.info(f"[TransFusion] Model B + Permuted Task Vector | Target set: acc={acc_task:.4f}, loss={loss:.4f}")
 
         loss, acc_sup = evaluate_model(
             model_b_t, support_dataloader, support_dataset, device, prompt_ensemble=True)
-        print(f"Model B + Perm T | SUPPORT : {acc_sup}, loss {loss}")
+        logger.info(f"[TransFusion] Model B + Permuted Task Vector | Support set: acc={acc_sup:.4f}, loss={loss:.4f}")
 
         log_data.update({
-            f"Model B + PT TASK acc": 100*(acc_task - acc_task_zs),
-            f"Model B + PT SUPPORT acc": 100*(acc_sup - acc_supp_zs),
+            "Delta/PermutedTaskVector/Target_Accuracy(%)": 100*(acc_task - acc_task_zs),
+            "Delta/PermutedTaskVector/Support_Accuracy(%)": 100*(acc_sup - acc_supp_zs),
+            "PermutedTaskVector/Target_Accuracy": acc_task,
+            "PermutedTaskVector/Support_Accuracy": acc_sup,
+            "PermutedTaskVector/Target_Loss": loss,
+            "PermutedTaskVector/Support_Loss": loss
         })
 
-        wandb.log(log_data)
+        if wandb is not None:
+            wandb.log(log_data)
 
 
 if __name__ == '__main__':

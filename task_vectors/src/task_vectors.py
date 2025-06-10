@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 """
 Implements the TaskVector class for model difference arithmetic.
 Supports initialization from checkpoints or vectors and arithmetic operations.
@@ -40,7 +42,7 @@ class TaskVector():
                 self.vector = {}
                 for key in pretrained_state_dict:
                     if pretrained_state_dict[key].dtype in [torch.int64, torch.uint8]:
-                        print(key)
+                        logger.info(f"Skipping key (int/uint): {key}")
                         continue
                     self.vector[key] = finetuned_state_dict[key] - \
                         pretrained_state_dict[key]
@@ -51,8 +53,7 @@ class TaskVector():
             new_vector = {}
             for key in self.vector:
                 if key not in other.vector:
-                    print(
-                        f'Warning, key {key} is not present in both task vectors.')
+                    logger.warning(f'Key {key} is not present in both task vectors.')
                     continue
                 new_vector[key] = self.vector[key] + other.vector[key]
         return TaskVector(vector=new_vector)
@@ -192,7 +193,7 @@ class TaskVector():
             # Avoid division by zero
             if norm_A > 0 and norm_B > 0:
                 scale_factor = norm_B / norm_A
-                # print(scale_factor)
+                # logger.info(f"Scale factor for {key}: {scale_factor}")
             else:
                 scale_factor = 1.0
 
@@ -206,7 +207,7 @@ class TaskVector():
             # Avoid division by zero
             if norm_A > 0:
                 scale_factor = norm_ta * norm_B / norm_A
-                # print(scale_factor)
+                # logger.info(f"Proportional scale factor for {key}: {scale_factor}")
             else:
                 scale_factor = 1.0
 
@@ -223,8 +224,7 @@ class TaskVector():
                 if 'num_batches_tracked' in key:
                     continue
                 elif key not in self.vector:
-                    print(
-                        f'Warning: key {key} is present in the pretrained state dict but not in the task vector')
+                    logger.warning(f'Key {key} is present in the pretrained state dict but not in the task vector')
                     continue
                 # Check if the key corresponds to any of the layers we want to skip
                 if layers_to_skip is not None:
@@ -256,8 +256,7 @@ class TaskVector():
                 if 'identity' in key:
                     new_state_dict[key] = pretrained_state_dict[key]
                 elif key not in self.vector:
-                    print(
-                        f'Warning: key {key} is present in the pretrained state dict but not in the task vector')
+                    logger.warning(f'Key {key} is present in the pretrained state dict but not in the task vector')
                     continue
                 # Check if the key corresponds to any of the layers we want to skip
                 if len(layers_to_skip) > 0:
