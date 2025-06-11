@@ -2,7 +2,6 @@
 Main script for running CLIP zero-shot evaluation and permutation-based transfer.
 Handles argument parsing, model loading, evaluation, and permutation matching between models.
 """
-# filepath: /homes/frinaldi/TransFusion/run_open_clip.py
 
 import logging
 import sys
@@ -92,12 +91,12 @@ def main(args):
         depth=clip_a.visual.transformer.layers).create_permutation_spec()
 
     # permutations_path = Path(args.base_folder, "permutations", args.arch)
-    permutations_path = Path("./permutations", args.arch)
+    permutations_path = Path("./permutations/permutations_backup", args.arch)
 
-    if os.path.exists(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl')):
-        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'rb') as f:
+    if os.path.exists(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}.pkl')):
+        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}.pkl'), 'rb') as f:
             permutation_visual = pickle.load(f)
-        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'rb') as f:
+        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}.pkl'), 'rb') as f:
             heads_permutation_visual = pickle.load(f)
     else:
         if not os.path.exists(permutations_path):
@@ -113,9 +112,9 @@ def main(args):
 
         permutation_visual, heads_permutation_visual = weight_matcher.run()
 
-        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'wb') as f:
+        with open(Path(permutations_path, f'permutations_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}.pkl'), 'wb') as f:
             pickle.dump(permutation_visual, f)
-        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}_no_bias.pkl'), 'wb') as f:
+        with open(Path(permutations_path, f'heads_permutation_visual_{args.pretraining_backbone_A}_to_{args.pretraining_backbone_B}_{args.seed}.pkl'), 'wb') as f:
             pickle.dump(heads_permutation_visual, f)
 
     # PERMUTED TASK VECTOR
@@ -178,8 +177,5 @@ def main(args):
 
 
 if __name__ == '__main__':
-    """
-    Entry point for the script. Parses arguments and runs the main function.
-    """
     args = parse_arguments()
     main(args)

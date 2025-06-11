@@ -89,7 +89,7 @@ def conv_axes(name, in_perm, out_perm, bias=False):
 
     return axes
 
-# Funzione di utilità per LayerNorm
+# Utility function for LayerNorm
 
 
 def layernorm_axes(name, perm):
@@ -103,7 +103,7 @@ def layernorm_axes(name, perm):
     """
     return {f"{name}.weight": (perm,), f"{name}.bias": (perm,)}
 
-# Funzione di utilità per BatchNorm
+# Utility function for BatchNorm
 
 
 def batchnorm_axes(name, perm):
@@ -184,7 +184,7 @@ def shortcut_block_axes(name, in_perm, out_perm, norm_layer="ln"):
         **norm_axes(f"{name}.downsample.1", out_perm),
     }
 
-# Funzione per definire i layer densi
+# Function to define dense layers
 
 
 def dense_layer_axes(name, in_perm, out_perm, bias=True):
@@ -200,7 +200,7 @@ def dense_layer_axes(name, in_perm, out_perm, bias=True):
     """
     return {f"{name}.weight": (out_perm, in_perm), f"{name}.bias": (out_perm,)}
 
-# Costruttore per il modello ResNet50, usando 3 convoluzioni per ogni blocco
+# Builder for the ResNet50 model, using 3 convolutions for each block
 
 
 class ResNet50PermutationSpecBuilder(PermutationSpecBuilder):
@@ -217,14 +217,14 @@ class ResNet50PermutationSpecBuilder(PermutationSpecBuilder):
     def create_permutation_spec(self) -> PermutationSpec:
         return self.permutation_spec_from_axes_to_perm(
             {
-                # Definizione delle permutazioni per logit scale (nessuna permutazione)
+                # Definition of permutations for logit scale (no permutation)
                 "logit_scale": (None,),
 
                 ########################
                 ######## Visual ########
                 ########################
 
-                # Layer iniziali (pre-layer convoluzioni)
+                # Initial layers (pre-layer convolutions)
                 **conv_axes("visual.conv1", in_perm=None, out_perm="P_conv1"),
                 **batchnorm_axes("visual.bn1", "P_conv1"),
 
@@ -234,12 +234,12 @@ class ResNet50PermutationSpecBuilder(PermutationSpecBuilder):
                 **conv_axes("visual.conv3", in_perm="P_conv2", out_perm="P_conv3"),
                 **batchnorm_axes("visual.bn3", "P_conv3"),
 
-                # Layer 1 (easy block senza cambiamento di canali)
+                # Layer 1 (easy block without channel change)
                 **shortcut_block_axes("visual.layer1.0", in_perm="P_conv3", out_perm="P_conv4"),
                 **easyblock_axes("visual.layer1.1", perm="P_conv4"),
                 **easyblock_axes("visual.layer1.2", perm="P_conv4"),
 
-                # Layer 2 (shortcut block con cambiamento di canali)
+                # Layer 2 (shortcut block with channel change)
                 **shortcut_block_axes("visual.layer2.0", in_perm="P_conv4", out_perm="P_conv5"),
                 **easyblock_axes("visual.layer2.1", perm="P_conv5"),
                 **easyblock_axes("visual.layer2.2", perm="P_conv5"),
@@ -317,7 +317,7 @@ class CLIP_Visual_PermutationSpecBuilder(PermutationSpecBuilder):
             f"{prefix}ln_post.weight": ('P_last',),
             f"{prefix}ln_post.bias": ('P_last',),
             # (1, 1, dim) probably P_transf_in or its own P
-            f"{prefix}proj": ('P_last', None),  # Note: this weights are not transposed
+            f"{prefix}proj": ('P_last', None),  # Note: this weights are not transposed, it's also possible to permute the output of the visual encoder
 
 
         }
@@ -351,7 +351,7 @@ class CLIP_Text_PermutationSpecBuilder(PermutationSpecBuilder):
             "ln_final.bias": ('P_T_last',),  # ()?
 
             # linear proj
-            "text_projection": ('P_T_last', 'P_proj'),  # Note: this weights are not transposed
+            "text_projection": ('P_T_last', None),  # Note: this weights are not transposed,  it's also possible to permute the output of the text encoder
 
         }
 

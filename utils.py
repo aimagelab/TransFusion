@@ -39,9 +39,9 @@ def parse_arguments():
     Returns:
         argparse.Namespace: Parsed arguments.
     """
-    parser = argparse.ArgumentParser(description='CLIP zero-shot evaluation')
-    parser.add_argument('--seed', default=33, type=int,
-                        help='Seed for initializing training.')
+    parser = argparse.ArgumentParser(description='TransFusion: CLIP Zero-shot Evaluation and Permutation Transfer')
+    parser.add_argument('--seed', default=89, type=int,
+                        help='Seed for reproducibility.')
     parser.add_argument('--dataset', type=str, default='eurosat',
                         choices=['cifar100', 'eurosat', 'dtd', 'gtsrb', 'resisc45', 'svhn', 'sun397', 'imagenetr'], help="Dataset to evaluate.")
     parser.add_argument('--batch_size', default=32,
@@ -58,8 +58,7 @@ def parse_arguments():
                         type=str, help='Path to finetuned model A. If not set, defaults to checkpoints/<arch>/<dataset>/model.pt')
     parser.add_argument('--alpha', default=0.8, type=float,
                         help='Scaling coefficient.')
-    parser.add_argument(
-        '--experiment_name', default='TransFusion', type=str, help='Experiment name.')
+    parser.add_argument('--experiment_name', default='TransFusion', type=str, help='Experiment name.')
     parser.add_argument('--max_alpha', default=1,
                         type=float, help='Max alpha.')
     parser.add_argument('--wandb_mode', default='offline', type=str,

@@ -3,9 +3,12 @@
 venv/
 *.err
 *.out
-requirements_copy.txt
 __pycache__/
 *.ipynb
 ./vscode/*
 *.pkl
+!permutations/permutations_backup/ViT-B-16/heads_permutation_visual_commonpool_l_s1b_b8k_to_datacomp_l_s1b_b8k_89.pkl
+!permutations/permutations_backup/ViT-B-16/permutations_visual_commonpool_l_s1b_b8k_to_datacomp_l_s1b_b8k_89.pkl
 checkpoints/
+main_multiseed.py
+permutations_bakcup/

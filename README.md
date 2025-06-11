@@ -57,7 +57,7 @@ python main.py --arch <ARCH> \
     --dataset <DATASET> \
 ```
 
-Replace the arguments with your desired configuration. See `utils.py` and `src/parser.py` for all available options.
+Replace the arguments with your desired configuration. See `utils.py` for all available options.
 
 
 ### Fine-tuning 🔧
