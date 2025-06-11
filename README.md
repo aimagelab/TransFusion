@@ -53,7 +53,6 @@ To perform zero-shot evaluation and permutation-based transfer between two CLIP 
 python main.py --arch <ARCH> \
     --pretraining_backbone_A <MODEL_A> \
     --pretraining_backbone_B <MODEL_B> \
-    --finetuned_checkpoint_A <MODEL_A_FT>
     --dataset <DATASET> \
 ```
 
