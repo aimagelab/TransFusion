@@ -11,7 +11,7 @@ TransFusion provides a principled and practical framework for permutation-based 
 - 🔄 **Permutation Matching (Rebasin):** Compute and apply optimal permutations between models for effective model fusion, transfer, and task vector alignment.
 - 🧭 **Task Vector Extraction & Transfer:** Extract task vectors from fine-tuned models and transfer them across different pre-training seeds or sources, even when models are not aligned.
 - 🛠️ **Fine-tuning & Interpolation:** Utilities for fine-tuning and parameter interpolation.
-- 📚 **Extensive Dataset Support:** Built-in loaders and templates for datasets such as CIFAR100, EuroSAT, SUN397, DTD, SVHN, GTSRB, RESISC45, ImageNet-R, Cars, and more.
+- 📚 **Extensive Dataset Support:** Built-in loaders and templates for datasets such as CIFAR100, EuroSAT, SUN397, DTD, SVHN, GTSRB, RESISC45 and ImageNet-R
 
 
 
